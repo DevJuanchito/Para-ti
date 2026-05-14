@@ -1,191 +1,426 @@
-import {
+/*
+  JUANPLAY - Bot de música para Discord
+  Desarrollador/créditos únicos: DEVJUANCHO
+  Railway-ready · Node.js · discord.js v14 · @discordjs/voice · yt-dlp · ffmpeg
+*/
+
+'use strict';
+
+const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
+const crypto = require('node:crypto');
+const { spawn, spawnSync } = require('node:child_process');
+const {
   ActionRowBuilder,
   ActivityType,
   ButtonBuilder,
   ButtonStyle,
   Client,
   EmbedBuilder,
-  Events,
   GatewayIntentBits,
   PermissionFlagsBits,
   REST,
   Routes,
   SlashCommandBuilder,
-  MessageFlags
-} from 'discord.js';
-import {
+} = require('discord.js');
+const {
   AudioPlayerStatus,
+  NoSubscriberBehavior,
+  StreamType,
   VoiceConnectionStatus,
   createAudioPlayer,
   createAudioResource,
   entersState,
   getVoiceConnection,
   joinVoiceChannel,
-  NoSubscriberBehavior,
-  StreamType
-} from '@discordjs/voice';
-import { spawn } from 'node:child_process';
-import { createRequire } from 'node:module';
-import crypto from 'node:crypto';
-import ytSearch from 'yt-search';
-import ffmpegStatic from 'ffmpeg-static';
+} = require('@discordjs/voice');
 
-const require = createRequire(import.meta.url);
-
-const CONFIG = {
-  token: process.env.DISCORD_TOKEN || process.env.TOKEN,
-  guildId: process.env.GUILD_ID || '',
-  color: parseColor(process.env.BOT_COLOR || '#ff2f7d'),
-  emoji: process.env.DEFAULT_EMOJI || '🐵',
-  developer: process.env.DEVELOPER_NAME || 'DEVJUANCHO',
-  brand: process.env.BOT_BRAND || 'JUANPLAY',
-  version: '13.0.0',
-  defaultVolume: clamp(Number(process.env.DEFAULT_VOLUME || 85), 1, 150),
-  voiceTimeoutMs: Number(process.env.VOICE_TIMEOUT_MS || 120000),
-  selfDeaf: String(process.env.VOICE_SELF_DEAF || 'true').toLowerCase() !== 'false',
-  maxPlaylistItems: Number(process.env.MAX_PLAYLIST_ITEMS || 25),
-  maxQueueSize: Number(process.env.MAX_QUEUE_SIZE || 80),
-  cooldownMs: Number(process.env.COMMAND_COOLDOWN_MS || 2500),
-  privateResponses: String(process.env.PRIVATE_COMMAND_RESPONSES || 'true').toLowerCase() !== 'false',
-  publicPanel: String(process.env.PUBLIC_NOWPLAYING_PANEL || 'true').toLowerCase() !== 'false',
-  autoRecommend: String(process.env.AUTO_RECOMMEND_AFTER_END || 'true').toLowerCase() !== 'false',
-  recommendationCount: clamp(Number(process.env.RECOMMENDATION_COUNT || 5), 1, 10),
-  youtubeCookie: process.env.YOUTUBE_COOKIE || '',
-  ffmpegPath: process.env.FFMPEG_PATH || ffmpegStatic || 'ffmpeg',
-  ytdlpPath: process.env.YTDLP_PATH || 'yt-dlp'
+const BOT_VERSION = '1.0.0-railway-devjuancho';
+const COLORS = {
+  ok: 0x57f287,
+  warn: 0xffcc4d,
+  error: 0xed4245,
 };
 
-if (CONFIG.ffmpegPath) {
-  process.env.FFMPEG_PATH = CONFIG.ffmpegPath;
-}
+const env = (key, fallback = '') => (process.env[key] ?? fallback).toString().trim();
+const boolEnv = (key, fallback = false) => {
+  const raw = env(key, String(fallback)).toLowerCase();
+  return ['1', 'true', 'yes', 'si', 'sí', 'on'].includes(raw);
+};
+const intEnv = (key, fallback, min = Number.MIN_SAFE_INTEGER, max = Number.MAX_SAFE_INTEGER) => {
+  const value = Number.parseInt(env(key, String(fallback)), 10);
+  if (Number.isNaN(value)) return fallback;
+  return Math.max(min, Math.min(max, value));
+};
+const colorEnv = (key, fallback = '#ff2f7d') => {
+  const raw = env(key, fallback).replace('#', '');
+  if (/^[0-9a-fA-F]{6}$/.test(raw)) return Number.parseInt(raw, 16);
+  return Number.parseInt(fallback.replace('#', ''), 16);
+};
 
-if (!CONFIG.token) {
-  throw new Error('Falta DISCORD_TOKEN en Railway. Agrega DISCORD_TOKEN=TU_TOKEN_DEL_BOT');
-}
+const CONFIG = {
+  DISCORD_TOKEN: env('DISCORD_TOKEN'),
+  GUILD_ID: env('GUILD_ID'),
+  VOICE_TIMEOUT_MS: intEnv('VOICE_TIMEOUT_MS', 120000, 10000, 60 * 60 * 1000),
+  VOICE_SELF_DEAF: boolEnv('VOICE_SELF_DEAF', true),
+  DEFAULT_VOLUME: intEnv('DEFAULT_VOLUME', 85, 0, 150),
+  MAX_PLAYLIST_ITEMS: intEnv('MAX_PLAYLIST_ITEMS', 25, 1, 100),
+  MAX_QUEUE_SIZE: intEnv('MAX_QUEUE_SIZE', 80, 1, 300),
+  COMMAND_COOLDOWN_MS: intEnv('COMMAND_COOLDOWN_MS', 2500, 0, 60000),
+  PRIVATE_COMMAND_RESPONSES: boolEnv('PRIVATE_COMMAND_RESPONSES', true),
+  PUBLIC_NOWPLAYING_PANEL: boolEnv('PUBLIC_NOWPLAYING_PANEL', true),
+  AUTO_RECOMMEND_AFTER_END: boolEnv('AUTO_RECOMMEND_AFTER_END', true),
+  END_RECOMMENDATIONS_MODE: env('END_RECOMMENDATIONS_MODE', 'button').toLowerCase(),
+  RECOMMENDATION_COUNT: intEnv('RECOMMENDATION_COUNT', 5, 1, 10),
+  BOT_COLOR: colorEnv('BOT_COLOR', '#ff2f7d'),
+  DEFAULT_EMOJI: env('DEFAULT_EMOJI', '🐵') || '🐵',
+  DEVELOPER_NAME: env('DEVELOPER_NAME', 'DEVJUANCHO') || 'DEVJUANCHO',
+  BOT_BRAND: env('BOT_BRAND', 'JUANPLAY') || 'JUANPLAY',
+  YTDLP_BIN: env('YTDLP_BIN', 'yt-dlp') || 'yt-dlp',
+  FFMPEG_BIN: env('FFMPEG_BIN', 'ffmpeg') || 'ffmpeg',
+  YOUTUBE_COOKIE: process.env.YOUTUBE_COOKIE || '',
+};
 
 const client = new Client({
-  intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildVoiceStates]
+  intents: [
+    GatewayIntentBits.Guilds,
+    GatewayIntentBits.GuildVoiceStates,
+    GatewayIntentBits.GuildMessages,
+  ],
 });
 
 const guildStates = new Map();
 const cooldowns = new Map();
-const searchCache = new Map();
-const pendingProcesses = new Set();
+const buttonSessions = new Map();
+let commandsRegistered = false;
+let cookieFilePath = null;
 
-function parseColor(value) {
-  const clean = String(value).replace('#', '').trim();
-  const n = Number.parseInt(clean, 16);
-  return Number.isFinite(n) ? n : 0xff2f7d;
+function brandLine() {
+  return `${CONFIG.DEFAULT_EMOJI} ${CONFIG.BOT_BRAND} · ${CONFIG.DEVELOPER_NAME}`;
 }
 
-function clamp(num, min, max) {
-  if (Number.isNaN(num)) return min;
-  return Math.max(min, Math.min(max, num));
+function makeEmbed(title, description, color = CONFIG.BOT_COLOR) {
+  return new EmbedBuilder()
+    .setColor(color)
+    .setTitle(title)
+    .setDescription(description)
+    .setFooter({ text: `${CONFIG.BOT_BRAND} · Créditos ${CONFIG.DEVELOPER_NAME} · v${BOT_VERSION}` })
+    .setTimestamp();
 }
 
-function cut(text, max = 100) {
-  const str = String(text || '').replace(/\s+/g, ' ').trim();
-  return str.length > max ? `${str.slice(0, max - 1)}…` : str;
+function formatDuration(seconds) {
+  const n = Number(seconds);
+  if (!Number.isFinite(n) || n <= 0) return 'Desconocida';
+  const h = Math.floor(n / 3600);
+  const m = Math.floor((n % 3600) / 60);
+  const s = Math.floor(n % 60);
+  if (h > 0) return `${h}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
+  return `${m}:${String(s).padStart(2, '0')}`;
 }
 
-function safeUrl(url) {
+function trimText(text, max = 90) {
+  const clean = String(text || '').replace(/\s+/g, ' ').trim();
+  if (clean.length <= max) return clean;
+  return `${clean.slice(0, max - 1)}…`;
+}
+
+function safeUrl(text) {
   try {
-    return new URL(url).toString();
+    const parsed = new URL(text);
+    return parsed.protocol === 'http:' || parsed.protocol === 'https:';
   } catch {
-    return null;
+    return false;
   }
 }
 
-function isUrl(input) {
-  return /^https?:\/\//i.test(String(input || '').trim());
+function platformFromUrl(input = '') {
+  const s = input.toLowerCase();
+  if (s.includes('youtube.com') || s.includes('youtu.be')) return 'YouTube';
+  if (s.includes('soundcloud.com')) return 'SoundCloud';
+  if (s.includes('spotify.com')) return 'Spotify';
+  if (s.includes('music.apple.com')) return 'Apple Music';
+  if (s.includes('deezer.com')) return 'Deezer';
+  return safeUrl(input) ? 'Link' : 'YouTube Search';
 }
 
-function isDirectAudioUrl(input) {
-  return /^https?:\/\/.+\.(mp3|m4a|wav|ogg|opus|flac|webm)(\?.*)?$/i.test(String(input || '').trim());
+function isExternalMusicLink(input = '') {
+  const platform = platformFromUrl(input);
+  return ['Spotify', 'Apple Music', 'Deezer'].includes(platform);
 }
 
-function isSpotifyLike(url) {
-  return /open\.spotify\.com|music\.apple\.com|deezer\.com/i.test(url);
+function ytdlpBaseArgs() {
+  const args = ['--no-warnings', '--ignore-config'];
+  if (CONFIG.YOUTUBE_COOKIE) {
+    const file = ensureCookieFile();
+    if (file) args.push('--cookies', file);
+  }
+  return args;
 }
 
-function platformName(url) {
-  if (/youtu\.?be|youtube\.com/i.test(url)) return 'YouTube';
-  if (/soundcloud\.com/i.test(url)) return 'SoundCloud';
-  if (/open\.spotify\.com/i.test(url)) return 'Spotify → YouTube';
-  if (/music\.apple\.com/i.test(url)) return 'Apple Music → YouTube';
-  if (/deezer\.com/i.test(url)) return 'Deezer → YouTube';
-  if (isDirectAudioUrl(url)) return 'Audio directo';
-  return isUrl(url) ? 'Plataforma compatible' : 'Búsqueda por nombre';
+function ensureCookieFile() {
+  if (!CONFIG.YOUTUBE_COOKIE) return null;
+  if (cookieFilePath && fs.existsSync(cookieFilePath)) return cookieFilePath;
+  cookieFilePath = path.join(os.tmpdir(), 'juanplay_youtube_cookies.txt');
+  const value = CONFIG.YOUTUBE_COOKIE.replace(/\\n/g, '\n');
+  fs.writeFileSync(cookieFilePath, value, 'utf8');
+  return cookieFilePath;
 }
 
-function baseEmbed(title, description = '') {
-  return new EmbedBuilder()
-    .setColor(CONFIG.color)
-    .setTitle(`${CONFIG.emoji} ${title}`)
-    .setDescription(description)
-    .setFooter({ text: `${CONFIG.brand} v${CONFIG.version} • Desarrollador único: ${CONFIG.developer}` })
-    .setTimestamp(new Date());
+function classifyYtdlpError(stderr = '') {
+  const text = String(stderr || '');
+  if (/429|too many requests|temporarily blocked|blocked/i.test(text)) {
+    return 'YouTube bloqueó temporalmente la IP del hosting (error 429). El bot funciona sin cookies por defecto; si el bloqueo continúa, agrega una variable opcional YOUTUBE_COOKIE con cookies válidas en formato Netscape.';
+  }
+  if (/sign in to confirm|bot|captcha/i.test(text)) {
+    return 'YouTube pidió verificación anti-bot para esta IP. Prueba de nuevo más tarde o usa la variable opcional YOUTUBE_COOKIE si tu hosting está bloqueado.';
+  }
+  return trimText(text, 350) || 'yt-dlp no pudo obtener información de esa canción.';
 }
 
-function progressBar() {
-  return '▰▰▰▱▱▱▱▱▱▱';
+function runProcess(command, args, options = {}) {
+  const timeoutMs = options.timeoutMs ?? 20000;
+  const maxBuffer = options.maxBuffer ?? 4 * 1024 * 1024;
+  return new Promise((resolve, reject) => {
+    let stdout = '';
+    let stderr = '';
+    let settled = false;
+    const child = spawn(command, args, {
+      stdio: ['ignore', 'pipe', 'pipe'],
+      windowsHide: true,
+      env: process.env,
+    });
+
+    const timer = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      child.kill('SIGKILL');
+      reject(new Error(`${command} tardó demasiado en responder.`));
+    }, timeoutMs);
+
+    child.stdout.on('data', (chunk) => {
+      stdout += chunk.toString('utf8');
+      if (stdout.length > maxBuffer) stdout = stdout.slice(-maxBuffer);
+    });
+    child.stderr.on('data', (chunk) => {
+      stderr += chunk.toString('utf8');
+      if (stderr.length > maxBuffer) stderr = stderr.slice(-maxBuffer);
+    });
+    child.on('error', (err) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      reject(err);
+    });
+    child.on('close', (code) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      if (code === 0) return resolve({ stdout, stderr });
+      const err = new Error(classifyYtdlpError(stderr));
+      err.stderr = stderr;
+      err.code = code;
+      reject(err);
+    });
+  });
+}
+
+async function ytdlpJson(target, options = {}) {
+  const args = [
+    ...ytdlpBaseArgs(),
+    '--dump-single-json',
+    '--skip-download',
+    target,
+  ];
+  if (options.noPlaylist !== false) args.splice(args.length - 1, 0, '--no-playlist');
+  if (options.flat) args.splice(args.length - 1, 0, '--flat-playlist');
+  const { stdout } = await runProcess(CONFIG.YTDLP_BIN, args, { timeoutMs: options.timeoutMs ?? 25000 });
+  return JSON.parse(stdout);
+}
+
+async function ytdlpPlaylistJson(target, limit) {
+  const args = [
+    ...ytdlpBaseArgs(),
+    '--dump-single-json',
+    '--flat-playlist',
+    '--skip-download',
+    '--playlist-end',
+    String(limit),
+    target,
+  ];
+  const { stdout } = await runProcess(CONFIG.YTDLP_BIN, args, { timeoutMs: 30000, maxBuffer: 8 * 1024 * 1024 });
+  return JSON.parse(stdout);
+}
+
+async function youtubeSearch(query, count = 1) {
+  const target = `ytsearch${count}:${query}`;
+  const data = await ytdlpJson(target, { flat: true, noPlaylist: false, timeoutMs: 22000 });
+  const entries = Array.isArray(data.entries) ? data.entries : [];
+  return entries.slice(0, count).map((entry) => normalizeTrack(entry, 'YouTube', query)).filter(Boolean);
+}
+
+async function autocompleteSearch(query) {
+  if (!query || query.trim().length < 2) return [];
+  try {
+    const results = await youtubeSearch(query, 8);
+    return results.map((track) => ({
+      name: trimText(`${track.title} · ${track.platform}`, 90),
+      value: track.title.slice(0, 100),
+    })).slice(0, 25);
+  } catch {
+    return [];
+  }
+}
+
+function normalizeUrl(entry) {
+  const raw = entry?.webpage_url || entry?.original_url || entry?.url || '';
+  if (!raw) return '';
+  if (/^[a-zA-Z0-9_-]{11}$/.test(raw)) return `https://www.youtube.com/watch?v=${raw}`;
+  if (String(raw).startsWith('http')) return raw;
+  if (entry?.ie_key === 'Youtube' || entry?.extractor_key === 'Youtube') return `https://www.youtube.com/watch?v=${raw}`;
+  return raw;
+}
+
+function normalizeTrack(entry, fallbackPlatform = 'YouTube', sourceQuery = '') {
+  if (!entry) return null;
+  const url = normalizeUrl(entry);
+  const title = entry.title || entry.fulltitle || sourceQuery || 'Canción sin título';
+  if (!url && !title) return null;
+  let platform = fallbackPlatform;
+  if (entry.extractor_key) platform = entry.extractor_key.replace(/_/g, ' ');
+  if (url) platform = platformFromUrl(url) === 'Link' ? platform : platformFromUrl(url);
+  return {
+    title: trimText(title, 160),
+    url,
+    duration: entry.duration || entry.duration_string || 0,
+    platform,
+    thumbnail: entry.thumbnail || (Array.isArray(entry.thumbnails) && entry.thumbnails.at(-1)?.url) || null,
+    uploader: entry.uploader || entry.channel || entry.artist || '',
+    sourceQuery,
+  };
+}
+
+async function resolveExternalMusicLink(input) {
+  // Spotify, Apple Music y Deezer se tratan como búsqueda por título cuando yt-dlp logra leer metadatos.
+  // Si el hosting o la plataforma no entrega título, se avisa de forma privada al usuario.
+  const platform = platformFromUrl(input);
+  try {
+    const info = await ytdlpJson(input, { timeoutMs: 25000 });
+    const titleParts = [info.artist, info.creator, info.uploader, info.title].filter(Boolean);
+    const title = titleParts.length > 1 ? `${titleParts[0]} ${info.title}` : info.title;
+    if (title && !/^spotify|apple music|deezer$/i.test(title.trim())) {
+      const found = await youtubeSearch(title, 1);
+      if (found[0]) {
+        found[0].platform = `${platform} → YouTube`;
+        found[0].sourceQuery = title;
+        return found;
+      }
+    }
+  } catch {
+    // Continuar con un intento más básico desde el slug de la URL.
+  }
+  const fallback = input
+    .split(/[/?#]/)
+    .filter(Boolean)
+    .at(-1)
+    ?.replace(/[-_]/g, ' ')
+    ?.replace(/\btrack\b|\balbum\b|\bsong\b/gi, '')
+    ?.trim();
+  if (fallback && fallback.length > 4 && !/^[a-z0-9]{15,}$/i.test(fallback)) {
+    const found = await youtubeSearch(fallback, 1);
+    if (found[0]) {
+      found[0].platform = `${platform} → YouTube`;
+      found[0].sourceQuery = fallback;
+      return found;
+    }
+  }
+  throw new Error(`${platform} fue detectado, pero no se pudo leer el título desde ese link. Escribe el nombre de la canción o artista para buscarla en YouTube.`);
+}
+
+function looksLikePlaylist(input) {
+  if (!safeUrl(input)) return false;
+  const s = input.toLowerCase();
+  return s.includes('list=') || s.includes('/playlist') || s.includes('/sets/');
+}
+
+async function resolveInput(input, maxItems = 1) {
+  const clean = String(input || '').trim();
+  if (!clean) throw new Error('Escribe el nombre o link de una canción.');
+
+  if (safeUrl(clean) && isExternalMusicLink(clean)) {
+    return resolveExternalMusicLink(clean);
+  }
+
+  if (safeUrl(clean)) {
+    if (looksLikePlaylist(clean) && maxItems > 1) {
+      const playlist = await ytdlpPlaylistJson(clean, maxItems);
+      const entries = Array.isArray(playlist.entries) ? playlist.entries : [];
+      const tracks = entries.map((entry) => normalizeTrack(entry, platformFromUrl(clean), clean)).filter((t) => t && t.url);
+      if (tracks.length) return tracks.slice(0, maxItems);
+    }
+    const info = await ytdlpJson(clean, { timeoutMs: 30000 });
+    if (Array.isArray(info.entries) && info.entries.length) {
+      return info.entries.slice(0, maxItems).map((entry) => normalizeTrack(entry, platformFromUrl(clean), clean)).filter(Boolean);
+    }
+    const track = normalizeTrack(info, platformFromUrl(clean), clean);
+    if (!track || !track.url) throw new Error('No pude resolver ese link de música.');
+    return [track];
+  }
+
+  const results = await youtubeSearch(clean, maxItems);
+  if (!results.length) throw new Error('No encontré resultados en YouTube para esa búsqueda.');
+  return results;
+}
+
+function attachRequester(track, interaction) {
+  return {
+    ...track,
+    requestedById: interaction.user.id,
+    requestedByTag: interaction.user.tag,
+    requestedByName: interaction.member?.displayName || interaction.user.globalName || interaction.user.username,
+  };
 }
 
 function getState(guildId) {
   if (!guildStates.has(guildId)) {
     const player = createAudioPlayer({
-      behaviors: { noSubscriber: NoSubscriberBehavior.Play }
+      behaviors: { noSubscriber: NoSubscriberBehavior.Play },
     });
-
     const state = {
       guildId,
       player,
       connection: null,
       queue: [],
-      history: [],
       current: null,
-      volume: CONFIG.defaultVolume,
-      textChannel: null,
-      panelMessage: null,
+      volume: CONFIG.DEFAULT_VOLUME,
+      panelMessageId: null,
       panelChannelId: null,
-      cleanup: null,
-      playingStartedAt: null,
-      lastError: null
+      lastTextChannelId: null,
+      lastRequesterId: null,
+      recommendationSeed: null,
+      idleTimer: null,
+      currentProcesses: [],
+      testMode: false,
+      lock: false,
     };
 
-    player.on(AudioPlayerStatus.Playing, () => {
-      state.playingStartedAt = Date.now();
-      console.log(`[JUANPLAY audio] Reproduciendo en servidor ${state.guildId}: ${state.current?.title || 'audio de prueba'}`);
+    player.on(AudioPlayerStatus.Idle, async () => {
+      if (state.testMode) {
+        state.testMode = false;
+        await refreshPanelByState(state, 'idle').catch(() => {});
+        scheduleVoiceTimeout(state);
+        return;
+      }
+      await handleTrackEnded(state).catch((error) => console.error('[JUANPLAY] Error al terminar pista:', error));
     });
 
-    player.on(AudioPlayerStatus.Idle, () => {
-      console.log(`[JUANPLAY audio] Player quedó idle en servidor ${state.guildId}.`);
-      if (state.cleanup) {
-        state.cleanup();
-        state.cleanup = null;
-      }
-      if (state.current) {
-        state.history.unshift({ ...state.current, endedAt: Date.now() });
-        state.history = state.history.slice(0, 25);
-      }
+    player.on('error', async (error) => {
+      console.error('[JUANPLAY] Error de reproductor:', error?.message || error);
+      killCurrentProcesses(state);
+      const failed = state.current;
       state.current = null;
-      playNext(state.guildId).catch((err) => {
-        console.error('[JUANPLAY] Error avanzando la cola:', err);
-        state.lastError = err?.message || String(err);
-        updatePanel(state, 'error', state.lastError).catch(() => {});
-      });
-    });
-
-    player.on('error', (error) => {
-      console.error('[JUANPLAY] Error del reproductor:', error);
-      state.lastError = error?.message || String(error);
-      state.current = null;
-      if (state.cleanup) {
-        state.cleanup();
-        state.cleanup = null;
-      }
-      updatePanel(state, 'error', state.lastError).catch(() => {});
-      setTimeout(() => playNext(state.guildId).catch(() => {}), 1200);
+      await minimalPublicError(state, failed, error?.message || 'Error de audio').catch(() => {});
+      await playNext(state).catch((err) => console.error('[JUANPLAY] Error intentando siguiente canción:', err));
     });
 
     guildStates.set(guildId, state);
@@ -193,969 +428,741 @@ function getState(guildId) {
   return guildStates.get(guildId);
 }
 
-function setIdlePresence() {
-  if (!client.user) return;
-  client.user.setPresence({
-    status: 'online',
-    activities: [
-      {
-        type: ActivityType.Listening,
-        name: `${CONFIG.brand} • /play • ${CONFIG.developer}`
-      }
-    ]
-  }).catch?.(() => {});
-}
-
-function setPlayingPresence(track) {
-  if (!client.user || !track) return;
-  client.user.setPresence({
-    status: 'online',
-    activities: [
-      {
-        type: ActivityType.Listening,
-        name: cut(track.title, 120)
-      }
-    ]
-  }).catch?.(() => {});
-}
-
-function ytDlpBaseArgs() {
-  const args = [
-    '--no-warnings',
-    '--no-check-certificates',
-    '--prefer-free-formats',
-    '--add-header', 'user-agent:Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36',
-    '--add-header', 'referer:https://www.youtube.com/',
-    '--add-header', 'accept-language:es-ES,es;q=0.9,en;q=0.8',
-    '--retries', '8',
-    '--fragment-retries', '8',
-    '--extractor-retries', '4',
-    '--socket-timeout', '25'
-  ];
-  if (CONFIG.youtubeCookie) {
-    args.push('--add-header', `cookie:${CONFIG.youtubeCookie}`);
-  }
-  return args;
-}
-
-function runCommand(command, args, timeoutMs = 20000, maxOutput = 8 * 1024 * 1024) {
-  return new Promise((resolve, reject) => {
-    const child = spawn(command, args, { stdio: ['ignore', 'pipe', 'pipe'] });
-    pendingProcesses.add(child);
-    let stdout = '';
-    let stderr = '';
-    let killedByTimeout = false;
-    const timer = setTimeout(() => {
-      killedByTimeout = true;
-      child.kill('SIGKILL');
-    }, timeoutMs);
-    child.stdout.on('data', (chunk) => {
-      if (stdout.length < maxOutput) stdout += chunk.toString();
-    });
-    child.stderr.on('data', (chunk) => {
-      if (stderr.length < maxOutput) stderr += chunk.toString();
-    });
-    child.on('error', (err) => {
-      clearTimeout(timer);
-      pendingProcesses.delete(child);
-      reject(err);
-    });
-    child.on('close', (code, signal) => {
-      clearTimeout(timer);
-      pendingProcesses.delete(child);
-      if (code === 0) return resolve({ stdout, stderr });
-      reject(new Error(`${command} falló. code=${code} signal=${signal}${killedByTimeout ? ' timeout=true' : ''}\n${stderr || stdout}`));
-    });
-  });
-}
-
-async function ytdlpJson(input, extra = []) {
-  const args = [
-    ...ytDlpBaseArgs(),
-    '--dump-single-json',
-    '--skip-download',
-    ...extra,
-    input
-  ];
-  const { stdout } = await runCommand(CONFIG.ytdlpPath, args, 25000);
-  return JSON.parse(stdout);
-}
-
-async function searchVideos(query, limit = 5) {
-  const clean = String(query || '').trim();
-  if (!clean) return [];
-  try {
-    const results = await Promise.race([
-      ytSearch(clean),
-      new Promise((_, reject) => setTimeout(() => reject(new Error('search timeout')), 6500))
-    ]);
-    return (results?.videos || [])
-      .filter((v) => v && v.url && v.title)
-      .slice(0, limit)
-      .map((v) => ({
-        title: v.title,
-        url: v.url,
-        duration: v.timestamp || 'Desconocida',
-        thumbnail: v.thumbnail,
-        author: v.author?.name || v.author || 'YouTube',
-        source: 'YouTube'
-      }));
-  } catch (err) {
-    console.warn('[JUANPLAY] yt-search falló, usando yt-dlp:', err?.message || err);
-    const data = await ytdlpJson(`ytsearch${limit}:${clean}`, ['--flat-playlist']);
-    const entries = data?.entries || [];
-    return entries.slice(0, limit).map((e) => ({
-      title: e.title || 'Resultado de YouTube',
-      url: e.url?.startsWith('http') ? e.url : `https://www.youtube.com/watch?v=${e.id || e.url}`,
-      duration: e.duration_string || e.duration || 'Desconocida',
-      thumbnail: e.thumbnail,
-      author: e.uploader || e.channel || 'YouTube',
-      source: 'YouTube'
-    }));
-  }
-}
-
-async function autocompleteVideos(query) {
-  const clean = String(query || '').trim();
-  if (clean.length < 2) return [];
-  try {
-    const results = await Promise.race([
-      searchVideos(clean, 8),
-      new Promise((resolve) => setTimeout(() => resolve([]), 2200))
-    ]);
-    return results.map((r) => ({
-      name: cut(`🎵 ${r.title} • ${r.author}`, 100),
-      value: cut(r.url || r.title, 100)
-    }));
-  } catch {
-    return [];
-  }
-}
-
-function createTrack(data, requester, originalQuery = '') {
-  return {
-    title: cut(data.title || originalQuery || 'Canción sin título', 180),
-    url: data.url || data.webpage_url || originalQuery,
-    webpageUrl: data.webpage_url || data.url || originalQuery,
-    duration: data.duration || data.duration_string || data.timestamp || 'Desconocida',
-    thumbnail: data.thumbnail || data.thumbnails?.at?.(-1)?.url || null,
-    author: data.author || data.uploader || data.channel || 'Desconocido',
-    source: data.source || platformName(data.url || originalQuery),
-    requestedById: requester.id,
-    requestedByTag: requester.tag || requester.username,
-    requestedAt: Date.now(),
-    originalQuery
-  };
-}
-
-async function resolveInput(input, requester) {
-  const query = String(input || '').trim();
-  if (!query) throw new Error('Escribe el nombre o link de una canción.');
-
-  if (isUrl(query)) {
-    const url = safeUrl(query);
-    if (!url) throw new Error('El link no parece válido.');
-
-    if (/list=|\/playlist\?/i.test(url) && /youtube\.com|youtu\.be/i.test(url)) {
-      const data = await ytdlpJson(url, ['--flat-playlist', '--playlist-end', String(CONFIG.maxPlaylistItems)]);
-      const entries = (data.entries || []).slice(0, CONFIG.maxPlaylistItems);
-      if (!entries.length) throw new Error('No encontré canciones en esa playlist.');
-      const tracks = entries.map((entry) => createTrack({
-        title: entry.title,
-        url: entry.url?.startsWith('http') ? entry.url : `https://www.youtube.com/watch?v=${entry.id || entry.url}`,
-        duration: entry.duration_string || entry.duration,
-        thumbnail: entry.thumbnail,
-        author: entry.uploader || entry.channel || 'YouTube',
-        source: 'YouTube Playlist'
-      }, requester, query));
-      return tracks;
-    }
-
-    if (isSpotifyLike(url)) {
-      let metadataText = url;
-      try {
-        const data = await ytdlpJson(url, ['--no-playlist']);
-        metadataText = [data.title, data.artist || data.uploader || data.channel].filter(Boolean).join(' ');
-      } catch {
-        metadataText = decodeURIComponent(url).replace(/[/?=&._-]+/g, ' ');
-      }
-      const results = await searchVideos(metadataText, 1);
-      if (!results.length) throw new Error('No encontré una versión reproducible para ese link.');
-      return [createTrack({ ...results[0], source: platformName(url) }, requester, query)];
-    }
-
+function killCurrentProcesses(state) {
+  for (const child of state.currentProcesses || []) {
     try {
-      const data = isDirectAudioUrl(url)
-        ? { title: url.split('/').pop()?.split('?')[0] || 'Audio directo', url, duration: 'Desconocida', source: 'Audio directo' }
-        : await ytdlpJson(url, ['--no-playlist']);
-      return [createTrack({
-        title: data.title,
-        url: data.webpage_url || data.original_url || url,
-        duration: data.duration_string || secondsToTime(data.duration),
-        thumbnail: data.thumbnail,
-        author: data.uploader || data.channel || data.artist,
-        source: platformName(url)
-      }, requester, query)];
-    } catch (err) {
-      throw new Error(`No pude leer ese link. Prueba con el nombre de la canción. Detalle: ${cut(err.message, 180)}`);
+      if (child && !child.killed) child.kill('SIGKILL');
+    } catch {}
+  }
+  state.currentProcesses = [];
+}
+
+async function ensureVoiceConnection(interaction) {
+  const guild = interaction.guild;
+  const state = getState(guild.id);
+  const voiceChannel = interaction.member?.voice?.channel;
+  if (!voiceChannel) {
+    throw new Error('Entra primero a un canal de voz y vuelve a intentarlo.');
+  }
+
+  const me = guild.members.me || await guild.members.fetchMe();
+  const perms = voiceChannel.permissionsFor(me);
+  if (!perms?.has(PermissionFlagsBits.Connect)) throw new Error('No tengo permiso para conectarme a tu canal de voz.');
+  if (!perms?.has(PermissionFlagsBits.Speak)) throw new Error('No tengo permiso para hablar en tu canal de voz.');
+
+  const existing = getVoiceConnection(guild.id);
+  if (existing && state.connection === existing) {
+    if (existing.joinConfig.channelId !== voiceChannel.id) {
+      existing.destroy();
+      state.connection = null;
+    } else {
+      existing.subscribe(state.player);
+      return existing;
     }
   }
 
-  const results = await searchVideos(query, 1);
-  if (!results.length) throw new Error('No encontré resultados con ese nombre.');
-  return [createTrack(results[0], requester, query)];
+  const connection = joinVoiceChannel({
+    channelId: voiceChannel.id,
+    guildId: guild.id,
+    adapterCreator: guild.voiceAdapterCreator,
+    selfDeaf: CONFIG.VOICE_SELF_DEAF,
+  });
+  connection.subscribe(state.player);
+  state.connection = connection;
+
+  connection.on(VoiceConnectionStatus.Disconnected, async () => {
+    try {
+      await Promise.race([
+        entersState(connection, VoiceConnectionStatus.Signalling, 5000),
+        entersState(connection, VoiceConnectionStatus.Connecting, 5000),
+      ]);
+    } catch {
+      try { connection.destroy(); } catch {}
+      if (state.connection === connection) state.connection = null;
+    }
+  });
+
+  await entersState(connection, VoiceConnectionStatus.Ready, 15000);
+  return connection;
 }
 
-function secondsToTime(seconds) {
-  const n = Number(seconds);
-  if (!Number.isFinite(n) || n <= 0) return 'Desconocida';
-  const m = Math.floor(n / 60);
-  const s = Math.floor(n % 60).toString().padStart(2, '0');
-  return `${m}:${s}`;
-}
-
-async function connectToVoice(interaction) {
-  const member = interaction.member;
-  const voiceChannel = member?.voice?.channel;
-  if (!voiceChannel) {
-    throw new Error('Primero entra a un canal de voz y vuelve a usar el comando.');
-  }
-
-  const me = interaction.guild.members.me;
-  const perms = voiceChannel.permissionsFor(me);
-  const missing = [];
-  if (!perms?.has(PermissionFlagsBits.ViewChannel)) missing.push('Ver canal');
-  if (!perms?.has(PermissionFlagsBits.Connect)) missing.push('Conectarse');
-  if (!perms?.has(PermissionFlagsBits.Speak)) missing.push('Hablar');
-  if (missing.length) {
-    throw new Error(`Me faltan permisos en el canal de voz: ${missing.join(', ')}.`);
-  }
-
-  const state = getState(interaction.guildId);
-  state.textChannel = interaction.channel;
-
-  const old = getVoiceConnection(interaction.guildId);
-  if (old && old.joinConfig.channelId !== voiceChannel.id) {
-    old.destroy();
-    state.connection = null;
-  }
-
-  if (!state.connection || state.connection.state.status === VoiceConnectionStatus.Destroyed) {
-    state.connection = joinVoiceChannel({
-      channelId: voiceChannel.id,
-      guildId: interaction.guildId,
-      adapterCreator: interaction.guild.voiceAdapterCreator,
-      selfDeaf: CONFIG.selfDeaf,
-      selfMute: false
-    });
-
-    state.connection.on(VoiceConnectionStatus.Disconnected, async () => {
-      try {
-        await Promise.race([
-          entersState(state.connection, VoiceConnectionStatus.Signalling, 5000),
-          entersState(state.connection, VoiceConnectionStatus.Connecting, 5000)
-        ]);
-      } catch {
-        try { state.connection.destroy(); } catch {}
-        state.connection = null;
-        setIdlePresence();
-      }
-    });
-  }
-
-  state.connection.subscribe(state.player);
-  await entersState(state.connection, VoiceConnectionStatus.Ready, CONFIG.voiceTimeoutMs);
-  return state;
-}
-
-function createAudioPipeline(track, state) {
-  const children = [];
-
-  const commonAudioArgs = [
-    ...ytDlpBaseArgs(),
-    '-f', 'bestaudio[ext=webm][acodec=opus]/bestaudio[acodec=opus]/bestaudio[ext=webm]/bestaudio/best',
-    '-o', '-',
+function createMusicStream(track, state) {
+  const ytdlpArgs = [
+    ...ytdlpBaseArgs(),
+    '-q',
     '--no-playlist',
-    '--quiet',
-    '--no-progress',
-    track.url
+    '--force-ipv4',
+    '-f',
+    'bestaudio/best',
+    '-o',
+    '-',
+    track.url,
   ];
 
-  // Audio principal: mismo estilo estable que funcionaba en v7.
-  // Mandamos el stream de yt-dlp directo a Discord Voice y dejamos que @discordjs/voice lo procese.
-  // Esto evita el fallo de silencio de la v10 causado por el pipeline PCM/Raw en algunos hosts.
-  let main = null;
-  let resourceStream = null;
+  const ffmpegArgs = [
+    '-hide_banner',
+    '-loglevel',
+    'error',
+    '-i',
+    'pipe:0',
+    '-analyzeduration',
+    '0',
+    '-loglevel',
+    'error',
+    '-f',
+    's16le',
+    '-ar',
+    '48000',
+    '-ac',
+    '2',
+    'pipe:1',
+  ];
 
-  if (isDirectAudioUrl(track.url)) {
-    // Para links mp3/m4a/wav directos usamos FFmpeg como entrada HTTP y salida s16le.
-    main = spawn(CONFIG.ffmpegPath, [
-      '-hide_banner', '-loglevel', 'warning',
-      '-reconnect', '1', '-reconnect_streamed', '1', '-reconnect_delay_max', '5',
-      '-i', track.url,
-      '-vn', '-f', 's16le', '-ar', '48000', '-ac', '2', 'pipe:1'
-    ], { stdio: ['ignore', 'pipe', 'pipe'] });
-    resourceStream = main.stdout;
-    children.push(main);
-  } else {
-    main = spawn(CONFIG.ytdlpPath, commonAudioArgs, { stdio: ['ignore', 'pipe', 'pipe'] });
-    resourceStream = main.stdout;
-    children.push(main);
-  }
+  const ytdlp = spawn(CONFIG.YTDLP_BIN, ytdlpArgs, { stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true });
+  const ffmpeg = spawn(CONFIG.FFMPEG_BIN, ffmpegArgs, { stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true });
+  state.currentProcesses = [ytdlp, ffmpeg];
 
-  for (const child of children) {
-    pendingProcesses.add(child);
-    child.on('close', (code, signal) => {
-      pendingProcesses.delete(child);
-      if (code && code !== 0 && signal !== 'SIGKILL') {
-        console.warn(`[JUANPLAY audio] Proceso cerrado: code=${code} signal=${signal}`);
-      }
-    });
-    child.on('error', (err) => {
-      console.error('[JUANPLAY] Proceso de audio falló:', err?.message || err);
-      state.lastError = err?.message || String(err);
-    });
-    child.stderr?.on('data', (chunk) => {
-      const msg = chunk.toString().trim();
-      if (msg && !/Broken pipe|Immediate exit requested|Deleting original file/i.test(msg)) {
-        console.warn('[JUANPLAY audio]', cut(msg, 700));
-        if (/429|Too Many Requests|Sign in to confirm|cookies|bot/i.test(msg)) state.lastError = msg;
-      }
-    });
-  }
+  let ytdlpErr = '';
+  let ffmpegErr = '';
+  ytdlp.stderr.on('data', (d) => { ytdlpErr += d.toString('utf8'); });
+  ffmpeg.stderr.on('data', (d) => { ffmpegErr += d.toString('utf8'); });
 
-  const resource = createAudioResource(resourceStream, {
-    inputType: isDirectAudioUrl(track.url) ? StreamType.Raw : StreamType.Arbitrary,
-    inlineVolume: true,
-    metadata: track
+  ytdlp.on('error', (err) => console.error('[JUANPLAY] yt-dlp no inició:', err.message));
+  ffmpeg.on('error', (err) => console.error('[JUANPLAY] ffmpeg no inició:', err.message));
+  ytdlp.stdout.on('error', () => {});
+  ffmpeg.stdin.on('error', () => {});
+  ffmpeg.stdout.on('error', () => {});
+
+  ytdlp.stdout.pipe(ffmpeg.stdin);
+  ytdlp.on('close', (code) => {
+    try { ffmpeg.stdin.end(); } catch {}
+    if (code && state.current === track) {
+      console.error('[JUANPLAY] yt-dlp stream:', classifyYtdlpError(ytdlpErr));
+    }
   });
-  resource.volume?.setVolume(clamp(state.volume, 1, 150) / 100);
-
-  const cleanup = () => {
-    for (const child of children) {
-      try {
-        if (!child.killed) child.kill('SIGKILL');
-      } catch {}
+  ffmpeg.on('close', (code) => {
+    if (code && state.current === track) {
+      console.error('[JUANPLAY] ffmpeg stream:', trimText(ffmpegErr, 300));
     }
-  };
-
-  return { resource, cleanup };
-}
-
-async function playNext(guildId) {
-  const state = getState(guildId);
-  if (!state.connection) {
-    state.current = null;
-    setIdlePresence();
-    return;
-  }
-
-  if (!state.queue.length) {
-    state.current = null;
-    setIdlePresence();
-    await updatePanel(state, 'ended');
-    return;
-  }
-
-  const track = state.queue.shift();
-  state.current = track;
-  state.lastError = null;
-
-  try {
-    const { resource, cleanup } = createAudioPipeline(track, state);
-    state.cleanup = cleanup;
-    state.player.play(resource);
-    setPlayingPresence(track);
-    await updatePanel(state, 'playing');
-  } catch (err) {
-    state.lastError = err?.message || String(err);
-    console.error('[JUANPLAY] No pude iniciar canción:', err);
-    await updatePanel(state, 'error', state.lastError);
-    setTimeout(() => playNext(guildId).catch(() => {}), 1000);
-  }
-}
-
-function nowPlayingEmbed(state) {
-  const t = state.current;
-  if (!t) return baseEmbed('JUANPLAY está listo', 'Usa `/play` o `/juanplay` para poner música.');
-  const embed = baseEmbed('JUANPLAY está sonando ahora',
-    `### [${cut(t.title, 90)}](${t.webpageUrl || t.url})\n` +
-    `**Pedido por:** <@${t.requestedById}>\n` +
-    `**Canal / fuente:** ${t.source}\n` +
-    `**Duración:** ${t.duration || 'Desconocida'}\n` +
-    `**Volumen:** ${state.volume}%\n` +
-    `**Cola:** ${state.queue.length} canción(es)\n\n` +
-    `${progressBar()}\n` +
-    `**Desarrollador:** ${CONFIG.developer}`
-  );
-  if (t.thumbnail) embed.setThumbnail(t.thumbnail);
-  return embed;
-}
-
-function playerButtons(state, ended = false) {
-  const playing = state.player.state.status === AudioPlayerStatus.Playing;
-  const row1 = new ActionRowBuilder().addComponents(
-    new ButtonBuilder()
-      .setCustomId(playing ? 'jp:pause' : 'jp:resume')
-      .setLabel(playing ? 'Pausar' : 'Seguir')
-      .setEmoji(playing ? '⏸️' : '▶️')
-      .setStyle(playing ? ButtonStyle.Secondary : ButtonStyle.Success)
-      .setDisabled(ended),
-    new ButtonBuilder()
-      .setCustomId('jp:skip')
-      .setLabel('Saltar')
-      .setEmoji('⏭️')
-      .setStyle(ButtonStyle.Primary)
-      .setDisabled(ended),
-    new ButtonBuilder()
-      .setCustomId('jp:stop')
-      .setLabel('Stop')
-      .setEmoji('🛑')
-      .setStyle(ButtonStyle.Danger)
-      .setDisabled(ended),
-    new ButtonBuilder()
-      .setCustomId('jp:queue')
-      .setLabel('Cola privada')
-      .setEmoji('📜')
-      .setStyle(ButtonStyle.Secondary),
-    new ButtonBuilder()
-      .setCustomId('jp:similar')
-      .setLabel('Recomendados')
-      .setEmoji('✨')
-      .setStyle(ButtonStyle.Success)
-  );
-  return [row1];
-}
-
-async function updatePanel(state, mode = 'playing', detail = '') {
-  if (!CONFIG.publicPanel || !state.textChannel) return;
-
-  let embed;
-  let components = playerButtons(state, mode === 'ended');
-
-  if (mode === 'playing') {
-    embed = nowPlayingEmbed(state);
-  } else if (mode === 'ended') {
-    if (state.queue.length || state.current) return;
-    embed = baseEmbed('La música terminó',
-      `No mandaré recomendaciones públicas para no spamear.\n` +
-      `Pulsa **Recomendados** y solo tú verás sugerencias privadas.\n\n` +
-      `**Última canción:** ${state.history[0] ? `[${cut(state.history[0].title, 80)}](${state.history[0].webpageUrl || state.history[0].url})` : 'Ninguna'}\n` +
-      `**Desarrollador:** ${CONFIG.developer}`
-    );
-    if (state.history[0]?.thumbnail) embed.setThumbnail(state.history[0].thumbnail);
-  } else if (mode === 'error') {
-    embed = baseEmbed('JUANPLAY tuvo un problema de audio',
-      `Voy a intentar seguir con la siguiente canción.\n\n` +
-      `**Detalle corto:** ${cut(detail || 'Error desconocido', 250)}\n` +
-      `**Tip:** Usa /diagnostico. Este v13 usa el audio estable de v7 + panel público sin spam + instalación corregida.`
-    );
-  } else {
-    embed = baseEmbed('JUANPLAY', 'Panel actualizado.');
-  }
-
-  try {
-    if (state.panelMessage) {
-      await state.panelMessage.edit({ embeds: [embed], components });
-      return;
-    }
-    const msg = await state.textChannel.send({ embeds: [embed], components });
-    state.panelMessage = msg;
-    state.panelChannelId = state.textChannel.id;
-  } catch (err) {
-    console.warn('[JUANPLAY] No pude actualizar panel:', err?.message || err);
-    state.panelMessage = null;
-  }
-}
-
-function queueEmbed(state, user) {
-  if (!state.current && !state.queue.length) {
-    return baseEmbed('Cola de JUANPLAY', `No hay música en cola.\nSolicitado por: <@${user.id}>`);
-  }
-  const lines = [];
-  if (state.current) lines.push(`**Sonando:** [${cut(state.current.title, 70)}](${state.current.webpageUrl || state.current.url}) • <@${state.current.requestedById}>`);
-  if (state.queue.length) {
-    lines.push('', '**Siguientes:**');
-    state.queue.slice(0, 10).forEach((t, i) => lines.push(`[0m${i + 1}. [${cut(t.title, 65)}](${t.webpageUrl || t.url}) • <@${t.requestedById}>`));
-    if (state.queue.length > 10) lines.push(`…y ${state.queue.length - 10} más.`);
-  }
-  lines.push('', `**Solicitado por:** <@${user.id}>`);
-  return baseEmbed('Cola privada de JUANPLAY', lines.join('\n'));
-}
-
-async function sendPrivate(interaction, payload) {
-  const data = privatePayload(payload);
-  if (interaction.deferred || interaction.replied) return interaction.editReply(payload).catch(() => interaction.followUp(data));
-  return interaction.reply(data);
-}
-
-function isCooldown(interaction) {
-  const key = `${interaction.user.id}:${interaction.commandName || interaction.customId}`;
-  const now = Date.now();
-  const last = cooldowns.get(key) || 0;
-  if (now - last < CONFIG.cooldownMs) return Math.ceil((CONFIG.cooldownMs - (now - last)) / 1000);
-  cooldowns.set(key, now);
-  return 0;
-}
-
-async function handlePlay(interaction, input) {
-  const wait = isCooldown(interaction);
-  if (wait) {
-    return interaction.reply({ content: `⏳ Espera ${wait}s antes de usar otra vez el comando.`, flags: MessageFlags.Ephemeral });
-  }
-  await interaction.deferReply(CONFIG.privateResponses ? { flags: MessageFlags.Ephemeral } : {});
-
-  let state;
-  try {
-    state = await connectToVoice(interaction);
-  } catch (err) {
-    return interaction.editReply({ embeds: [baseEmbed('No pude entrar al canal de voz', err.message)] });
-  }
-
-  if (state.queue.length >= CONFIG.maxQueueSize) {
-    return interaction.editReply({ embeds: [baseEmbed('Cola llena', `La cola tiene el límite de ${CONFIG.maxQueueSize} canciones.`)] });
-  }
-
-  try {
-    const tracks = await resolveInput(input, interaction.user);
-    const available = Math.max(0, CONFIG.maxQueueSize - state.queue.length);
-    const accepted = tracks.slice(0, available);
-    state.queue.push(...accepted);
-
-    const shouldStart = !state.current && state.player.state.status !== AudioPlayerStatus.Playing;
-    if (shouldStart) await playNext(interaction.guildId);
-
-    const embed = baseEmbed('Agregado a JUANPLAY',
-      accepted.length === 1
-        ? `**Canción:** [${cut(accepted[0].title, 80)}](${accepted[0].webpageUrl || accepted[0].url})\n**La pidió:** <@${interaction.user.id}>\n**Posición en cola:** ${shouldStart ? 'Sonando ahora' : state.queue.length}`
-        : `Agregué **${accepted.length}** canciones a la cola.\n**Pedido por:** <@${interaction.user.id}>`
-    );
-    if (accepted[0]?.thumbnail) embed.setThumbnail(accepted[0].thumbnail);
-    return interaction.editReply({ embeds: [embed] });
-  } catch (err) {
-    console.error('[JUANPLAY] Error en /play:', err);
-    return interaction.editReply({ embeds: [baseEmbed('No pude reproducir eso', cut(err.message || String(err), 500))] });
-  }
-}
-
-function cacheResults(results, requesterId) {
-  const key = crypto.randomBytes(5).toString('hex');
-  searchCache.set(key, { results, requesterId, createdAt: Date.now() });
-  setTimeout(() => searchCache.delete(key), 15 * 60 * 1000).unref?.();
-  return key;
-}
-
-function resultsButtons(key, results) {
-  const rows = [];
-  let row = new ActionRowBuilder();
-  results.slice(0, 5).forEach((_, i) => {
-    if (row.components.length === 5) {
-      rows.push(row);
-      row = new ActionRowBuilder();
-    }
-    row.addComponents(new ButtonBuilder()
-      .setCustomId(`jp:add:${key}:${i}`)
-      .setLabel(`Poner #${i + 1}`)
-      .setEmoji('🎵')
-      .setStyle(ButtonStyle.Success));
   });
-  if (row.components.length) rows.push(row);
-  return rows;
-}
 
-async function handleSearch(interaction, query, title = 'Resultados privados') {
-  await interaction.deferReply({ flags: MessageFlags.Ephemeral });
-  const results = await searchVideos(query, 5);
-  if (!results.length) {
-    return interaction.editReply({ embeds: [baseEmbed('Sin resultados', 'No encontré canciones con ese texto.')] });
-  }
-  const key = cacheResults(results, interaction.user.id);
-  const desc = results.map((r, i) => `**${i + 1}.** [${cut(r.title, 75)}](${r.url})\n${r.author || 'YouTube'} • ${r.duration || 'Desconocida'}`).join('\n\n');
-  return interaction.editReply({ embeds: [baseEmbed(title, `${desc}\n\nSolo tú ves estos botones.`)], components: resultsButtons(key, results) });
-}
-
-async function recommendationResults(state, query = '') {
-  let base = query?.trim();
-  if (!base && state.current) base = `${state.current.title} ${state.current.author || ''}`;
-  if (!base && state.history[0]) base = `${state.history[0].title} ${state.history[0].author || ''}`;
-  if (!base) base = 'música latina popular 2026';
-  const cleaned = base.replace(/\(official.*?\)|\[official.*?\]|video oficial|official video|lyrics|letra/ig, '').trim();
-  return searchVideos(`${cleaned} canciones similares`, CONFIG.recommendationCount);
-}
-
-async function handleRecommendations(interaction, query = '') {
-  await interaction.deferReply({ flags: MessageFlags.Ephemeral });
-  const state = getState(interaction.guildId);
-  const results = await recommendationResults(state, query);
-  if (!results.length) return interaction.editReply({ embeds: [baseEmbed('Sin recomendados', 'No encontré recomendados ahora mismo.')] });
-  const key = cacheResults(results, interaction.user.id);
-  const desc = results.map((r, i) => `**${i + 1}.** [${cut(r.title, 75)}](${r.url})\n${r.author || 'YouTube'} • ${r.duration || 'Desconocida'}`).join('\n\n');
-  return interaction.editReply({ embeds: [baseEmbed('Recomendados para ti', `${desc}\n\nEstos recomendados solo los ves tú.`)], components: resultsButtons(key, results) });
-}
-
-async function handleAddButton(interaction, key, index) {
-  const entry = searchCache.get(key);
-  if (!entry) return interaction.reply({ content: '⏳ Esa búsqueda ya expiró. Usa /buscar otra vez.', flags: MessageFlags.Ephemeral });
-  if (entry.requesterId !== interaction.user.id) {
-    return interaction.reply({ content: '🔒 Estos botones son privados de otra persona. Usa /buscar o /recomendados para crear los tuyos.', flags: MessageFlags.Ephemeral });
-  }
-  const result = entry.results[Number(index)];
-  if (!result) return interaction.reply({ content: 'No encontré ese resultado.', flags: MessageFlags.Ephemeral });
-  await interaction.deferReply({ flags: MessageFlags.Ephemeral });
-  let state;
-  try {
-    state = await connectToVoice(interaction);
-    const track = createTrack(result, interaction.user, result.title);
-    state.queue.push(track);
-    const shouldStart = !state.current && state.player.state.status !== AudioPlayerStatus.Playing;
-    if (shouldStart) await playNext(interaction.guildId);
-    return interaction.editReply({ embeds: [baseEmbed('Agregado desde botones', `**${cut(track.title, 90)}**\nPedido por <@${interaction.user.id}>\n${shouldStart ? 'Sonando ahora.' : `Cola: ${state.queue.length}`}`)] });
-  } catch (err) {
-    return interaction.editReply({ embeds: [baseEmbed('No pude agregarlo', cut(err.message || String(err), 500))] });
-  }
-}
-
-function sameVoice(interaction, state) {
-  const userChannel = interaction.member?.voice?.channelId;
-  const botChannel = state.connection?.joinConfig?.channelId;
-  return userChannel && botChannel && userChannel === botChannel;
-}
-
-async function handleButton(interaction) {
-  const [prefix, action, key, index] = interaction.customId.split(':');
-  if (prefix !== 'jp') return;
-  if (action === 'add') return handleAddButton(interaction, key, index);
-
-  const state = getState(interaction.guildId);
-  if (['pause', 'resume', 'skip', 'stop'].includes(action) && !sameVoice(interaction, state)) {
-    return interaction.reply({ content: 'Entra al mismo canal de voz del bot para usar esos controles.', flags: MessageFlags.Ephemeral });
-  }
-
-  if (action === 'pause') {
-    state.player.pause();
-    await updatePanel(state, 'playing');
-    return interaction.reply({ content: '⏸️ Pausado.', flags: MessageFlags.Ephemeral });
-  }
-  if (action === 'resume') {
-    state.player.unpause();
-    await updatePanel(state, 'playing');
-    return interaction.reply({ content: '▶️ Siguiendo.', flags: MessageFlags.Ephemeral });
-  }
-  if (action === 'skip') {
-    state.player.stop(true);
-    return interaction.reply({ content: '⏭️ Saltando canción.', flags: MessageFlags.Ephemeral });
-  }
-  if (action === 'stop') {
-    state.queue = [];
-    state.player.stop(true);
-    if (state.connection) {
-      try { state.connection.destroy(); } catch {}
-      state.connection = null;
-    }
-    state.current = null;
-    setIdlePresence();
-    await updatePanel(state, 'ended');
-    return interaction.reply({ content: '🛑 Música detenida y cola limpiada.', flags: MessageFlags.Ephemeral });
-  }
-  if (action === 'queue') {
-    return interaction.reply({ embeds: [queueEmbed(state, interaction.user)], flags: MessageFlags.Ephemeral });
-  }
-  if (action === 'similar') {
-    return handleRecommendations(interaction, '');
-  }
-}
-
-async function diagnosticsEmbed(interaction) {
-  const lines = [];
-  lines.push(`**Bot:** ${client.user?.tag || 'No conectado'}`);
-  lines.push(`**Servidor:** ${interaction.guild?.name || interaction.guildId}`);
-  lines.push(`**Node:** ${process.version}`);
-  lines.push(`**FFmpeg:** ${CONFIG.ffmpegPath}`);
-  lines.push(`**yt-dlp:** ${CONFIG.ytdlpPath}`);
-  lines.push(`**Cookie YouTube:** ${CONFIG.youtubeCookie ? 'Configurada' : 'No configurada (puede funcionar sin ella)'}`);
-  try {
-    require.resolve('opusscript');
-    lines.push('**Opus:** OK (`opusscript`)');
-  } catch {
-    lines.push('**Opus:** ❌ Falta `opusscript`');
-  }
-  try {
-    const r = await runCommand(CONFIG.ytdlpPath, ['--version'], 10000, 10000);
-    lines.push(`**yt-dlp versión:** ${cut(r.stdout.trim(), 60)}`);
-  } catch (err) {
-    lines.push(`**yt-dlp prueba:** ❌ ${cut(err.message, 120)}`);
-  }
-  try {
-    const r = await runCommand(CONFIG.ffmpegPath, ['-version'], 10000, 10000);
-    lines.push(`**FFmpeg versión:** ${cut(r.stdout.split('\n')[0], 100)}`);
-  } catch (err) {
-    lines.push(`**FFmpeg prueba:** ❌ ${cut(err.message, 120)}`);
-  }
-  const state = getState(interaction.guildId);
-  lines.push(`**Conexión voz:** ${state.connection?.state?.status || 'sin conexión'}`);
-  lines.push(`**Player:** ${state.player?.state?.status || 'desconocido'}`);
-  lines.push(`**Cola:** ${state.queue.length}`);
-  if (state.lastError) lines.push(`**Último error:** ${cut(state.lastError, 200)}`);
-  return baseEmbed('Diagnóstico JUANPLAY', lines.join('\n'));
-}
-
-
-function privatePayload(payload = {}) {
-  return { ...payload, flags: MessageFlags.Ephemeral };
-}
-
-async function privateReply(interaction, payload = {}) {
-  return interaction.reply(privatePayload(payload));
-}
-
-async function privateDefer(interaction) {
-  return interaction.deferReply({ flags: MessageFlags.Ephemeral });
-}
-
-function createTestToneResource(state) {
-  const proc = spawn(CONFIG.ffmpegPath, [
-    '-hide_banner', '-loglevel', 'error',
-    '-f', 'lavfi', '-i', 'sine=frequency=880:duration=4',
-    '-filter:a', `volume=${Math.max(0.1, clamp(state.volume, 1, 150) / 100)}`,
-    '-f', 's16le', '-ar', '48000', '-ac', '2', 'pipe:1'
-  ], { stdio: ['ignore', 'pipe', 'pipe'] });
-  pendingProcesses.add(proc);
-  proc.on('close', () => pendingProcesses.delete(proc));
-  proc.on('error', (err) => {
-    pendingProcesses.delete(proc);
-    state.lastError = err?.message || String(err);
-  });
-  return createAudioResource(proc.stdout, {
+  const resource = createAudioResource(ffmpeg.stdout, {
     inputType: StreamType.Raw,
     inlineVolume: true,
-    metadata: { title: 'Prueba de audio JUANPLAY', requestedById: 'system' }
+    metadata: track,
   });
+  if (resource.volume) resource.volume.setVolume(Math.max(0, Math.min(2, state.volume / 100)));
+  return resource;
+}
+
+function createToneResource(state) {
+  const ffmpeg = spawn(CONFIG.FFMPEG_BIN, [
+    '-hide_banner',
+    '-loglevel',
+    'error',
+    '-f',
+    'lavfi',
+    '-i',
+    'sine=frequency=880:duration=2',
+    '-f',
+    's16le',
+    '-ar',
+    '48000',
+    '-ac',
+    '2',
+    'pipe:1',
+  ], { stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true });
+  state.currentProcesses = [ffmpeg];
+  return createAudioResource(ffmpeg.stdout, { inputType: StreamType.Raw, inlineVolume: true });
+}
+
+async function playNext(state) {
+  if (state.lock) return;
+  state.lock = true;
+  try {
+    clearVoiceTimeout(state);
+    killCurrentProcesses(state);
+    state.current = null;
+
+    if (!state.queue.length) {
+      await setPresenceIdle();
+      await refreshPanelByState(state, 'ended');
+      scheduleVoiceTimeout(state);
+      return;
+    }
+
+    const next = state.queue.shift();
+    state.current = next;
+    state.recommendationSeed = next;
+    state.lastRequesterId = next.requestedById || state.lastRequesterId;
+
+    const resource = createMusicStream(next, state);
+    state.player.play(resource);
+    await setPresencePlaying(next.title);
+    await refreshPanelByState(state, 'playing');
+  } finally {
+    state.lock = false;
+  }
+}
+
+async function handleTrackEnded(state) {
+  killCurrentProcesses(state);
+  if (state.current) state.recommendationSeed = state.current;
+  state.current = null;
+  await playNext(state);
+}
+
+function enqueueTracks(state, tracks) {
+  const freeSlots = CONFIG.MAX_QUEUE_SIZE - state.queue.length - (state.current ? 1 : 0);
+  if (freeSlots <= 0) throw new Error(`La cola está llena. Límite: ${CONFIG.MAX_QUEUE_SIZE} canciones.`);
+  const accepted = tracks.slice(0, freeSlots);
+  state.queue.push(...accepted);
+  return accepted;
+}
+
+function clearVoiceTimeout(state) {
+  if (state.idleTimer) clearTimeout(state.idleTimer);
+  state.idleTimer = null;
+}
+
+function scheduleVoiceTimeout(state) {
+  clearVoiceTimeout(state);
+  state.idleTimer = setTimeout(async () => {
+    if (state.current || state.queue.length) return;
+    killCurrentProcesses(state);
+    try { state.connection?.destroy(); } catch {}
+    state.connection = null;
+    await setPresenceIdle();
+  }, CONFIG.VOICE_TIMEOUT_MS);
+}
+
+async function refreshPanelByState(state, status = 'playing') {
+  if (!CONFIG.PUBLIC_NOWPLAYING_PANEL) return;
+  const channelId = state.lastTextChannelId || state.panelChannelId;
+  if (!channelId) return;
+  const channel = await client.channels.fetch(channelId).catch(() => null);
+  if (!channel || !channel.isTextBased()) return;
+
+  const embed = makePanelEmbed(state, status);
+  const components = makePanelButtons(Boolean(state.current));
+
+  if (state.panelMessageId) {
+    const existing = await channel.messages.fetch(state.panelMessageId).catch(() => null);
+    if (existing) {
+      await existing.edit({ embeds: [embed], components });
+      return;
+    }
+  }
+
+  const message = await channel.send({ embeds: [embed], components }).catch(() => null);
+  if (message) {
+    state.panelMessageId = message.id;
+    state.panelChannelId = channel.id;
+  }
+}
+
+function makePanelEmbed(state, status) {
+  if (state.current) {
+    const track = state.current;
+    const requester = track.requestedById ? `<@${track.requestedById}>` : (track.requestedByName || 'Desconocido');
+    const embed = makeEmbed(`${CONFIG.DEFAULT_EMOJI} ${CONFIG.BOT_BRAND} está reproduciendo`, `**${track.title}**`, CONFIG.BOT_COLOR)
+      .addFields(
+        { name: '🎵 Canción actual', value: track.url ? `[${trimText(track.title, 70)}](${track.url})` : track.title, inline: false },
+        { name: '🙋 Quién la pidió', value: requester, inline: true },
+        { name: '⏱️ Duración', value: formatDuration(track.duration), inline: true },
+        { name: '🌐 Plataforma', value: track.platform || 'YouTube', inline: true },
+        { name: '🔊 Volumen', value: `${state.volume}%`, inline: true },
+        { name: '📜 Canciones en cola', value: `${state.queue.length}`, inline: true },
+        { name: '👑 Créditos', value: CONFIG.DEVELOPER_NAME, inline: true },
+      );
+    if (track.thumbnail) embed.setThumbnail(track.thumbnail);
+    return embed;
+  }
+
+  const seed = state.recommendationSeed?.title ? `Última canción: **${state.recommendationSeed.title}**` : 'No hay canción sonando ahora.';
+  const msg = status === 'ended'
+    ? `${seed}\n\nLa cola está vacía. Usa el botón **Recomendados privados** o escribe **/play** para seguir escuchando.`
+    : 'El reproductor está inactivo.';
+  return makeEmbed(`${CONFIG.DEFAULT_EMOJI} ${CONFIG.BOT_BRAND} en espera`, msg, COLORS.warn)
+    .addFields(
+      { name: '📜 Canciones en cola', value: `${state.queue.length}`, inline: true },
+      { name: '🔊 Volumen', value: `${state.volume}%`, inline: true },
+      { name: '👑 Créditos', value: CONFIG.DEVELOPER_NAME, inline: true },
+    );
+}
+
+function makePanelButtons(isPlaying) {
+  return [new ActionRowBuilder().addComponents(
+    new ButtonBuilder().setCustomId('jp_pause').setLabel('Pausar').setEmoji('⏸️').setStyle(ButtonStyle.Secondary).setDisabled(!isPlaying),
+    new ButtonBuilder().setCustomId('jp_resume').setLabel('Reanudar').setEmoji('▶️').setStyle(ButtonStyle.Success),
+    new ButtonBuilder().setCustomId('jp_skip').setLabel('Saltar').setEmoji('⏭️').setStyle(ButtonStyle.Primary).setDisabled(!isPlaying),
+    new ButtonBuilder().setCustomId('jp_queue').setLabel('Cola privada').setEmoji('📜').setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId('jp_rec').setLabel('Recomendados privados').setEmoji('✨').setStyle(ButtonStyle.Secondary),
+  ), new ActionRowBuilder().addComponents(
+    new ButtonBuilder().setCustomId('jp_stop').setLabel('Stop').setEmoji('⏹️').setStyle(ButtonStyle.Danger).setDisabled(!isPlaying),
+  )];
+}
+
+async function minimalPublicError(state, track, reason) {
+  if (!state.lastTextChannelId) return;
+  const channel = await client.channels.fetch(state.lastTextChannelId).catch(() => null);
+  if (!channel || !channel.isTextBased()) return;
+  const embed = makeEmbed('⚠️ Error de reproducción', `No pude reproducir **${trimText(track?.title || 'esa canción', 90)}**. Intentaré continuar con la cola.`, COLORS.warn)
+    .addFields({ name: 'Detalle privado/técnico', value: trimText(reason, 120), inline: false });
+  if (state.panelMessageId) {
+    const msg = await channel.messages.fetch(state.panelMessageId).catch(() => null);
+    if (msg) return msg.edit({ embeds: [embed], components: makePanelButtons(false) }).catch(() => {});
+  }
+}
+
+async function setPresenceStartup() {
+  client.user?.setPresence({
+    activities: [{ name: '/play | DEVJUANCHO', type: ActivityType.Listening }],
+    status: 'online',
+  });
+}
+
+async function setPresencePlaying(title) {
+  client.user?.setPresence({
+    activities: [{ name: `Escuchando: ${trimText(title, 80)}`, type: ActivityType.Listening }],
+    status: 'online',
+  });
+}
+
+async function setPresenceIdle() {
+  client.user?.setPresence({
+    activities: [{ name: `${CONFIG.BOT_BRAND} | ${CONFIG.DEVELOPER_NAME}`, type: ActivityType.Listening }],
+    status: 'idle',
+  });
+}
+
+function commandDefinitions() {
+  const songOption = (builder, required = true) => builder
+    .setName('cancion')
+    .setDescription('Nombre o link de la canción')
+    .setRequired(required)
+    .setAutocomplete(true);
+
+  return [
+    new SlashCommandBuilder().setName('play').setDescription('Reproduce una canción por nombre o link').addStringOption((o) => songOption(o, true)),
+    new SlashCommandBuilder().setName('juanplay').setDescription('Alias bonito de /play').addStringOption((o) => songOption(o, true)),
+    new SlashCommandBuilder().setName('buscar').setDescription('Busca canciones y elige con botones privados').addStringOption((o) => songOption(o, true)),
+    new SlashCommandBuilder().setName('recomendados').setDescription('Muestra recomendaciones privadas').addStringOption((o) => songOption(o, false)),
+    new SlashCommandBuilder().setName('similares').setDescription('Busca canciones similares a la actual o a una canción').addStringOption((o) => songOption(o, false)),
+    new SlashCommandBuilder().setName('queue').setDescription('Muestra la cola de música en privado'),
+    new SlashCommandBuilder().setName('nowplaying').setDescription('Muestra la canción actual'),
+    new SlashCommandBuilder().setName('skip').setDescription('Salta la canción actual'),
+    new SlashCommandBuilder().setName('stop').setDescription('Detiene la música y limpia la cola'),
+    new SlashCommandBuilder().setName('pause').setDescription('Pausa la canción actual'),
+    new SlashCommandBuilder().setName('resume').setDescription('Reanuda la canción pausada'),
+    new SlashCommandBuilder().setName('volume').setDescription('Cambia el volumen').addIntegerOption((o) => o.setName('porcentaje').setDescription('Volumen de 0 a 150').setRequired(true).setMinValue(0).setMaxValue(150)),
+    new SlashCommandBuilder().setName('leave').setDescription('Saca al bot del canal de voz'),
+    new SlashCommandBuilder().setName('testvoz').setDescription('Prueba si el bot puede entrar al canal de voz'),
+    new SlashCommandBuilder().setName('testaudio').setDescription('Reproduce un tono corto para probar el audio'),
+    new SlashCommandBuilder().setName('diagnostico').setDescription('Revisa token, GUILD_ID, ffmpeg, yt-dlp, voz y permisos'),
+    new SlashCommandBuilder().setName('perfil').setDescription('Muestra el perfil recomendado del bot'),
+    new SlashCommandBuilder().setName('creditos').setDescription('Muestra los créditos oficiales'),
+    new SlashCommandBuilder().setName('help').setDescription('Muestra la ayuda de JUANPLAY'),
+  ].map((command) => command.toJSON());
+}
+
+async function registerCommands() {
+  if (commandsRegistered) return;
+  if (!CONFIG.DISCORD_TOKEN) throw new Error('Falta DISCORD_TOKEN en Railway.');
+  if (!CONFIG.GUILD_ID) throw new Error('Falta GUILD_ID en Railway.');
+  const rest = new REST({ version: '10' }).setToken(CONFIG.DISCORD_TOKEN);
+  await rest.put(Routes.applicationGuildCommands(client.user.id, CONFIG.GUILD_ID), { body: commandDefinitions() });
+  commandsRegistered = true;
+  console.log(`[JUANPLAY] Comandos slash registrados en GUILD_ID ${CONFIG.GUILD_ID}.`);
+}
+
+function isOnCooldown(interaction) {
+  if (!CONFIG.COMMAND_COOLDOWN_MS) return false;
+  const key = `${interaction.user.id}:${interaction.commandName || interaction.customId || 'button'}`;
+  const now = Date.now();
+  const last = cooldowns.get(key) || 0;
+  if (now - last < CONFIG.COMMAND_COOLDOWN_MS) return Math.ceil((CONFIG.COMMAND_COOLDOWN_MS - (now - last)) / 1000);
+  cooldowns.set(key, now);
+  return false;
+}
+
+async function replySmart(interaction, payload, ephemeral = CONFIG.PRIVATE_COMMAND_RESPONSES) {
+  const finalPayload = typeof payload === 'string' ? { content: payload } : payload;
+  if (ephemeral && finalPayload.ephemeral === undefined) finalPayload.ephemeral = true;
+  if (interaction.deferred || interaction.replied) return interaction.editReply(finalPayload).catch(() => {});
+  return interaction.reply(finalPayload).catch(() => {});
+}
+
+async function errorReply(interaction, error) {
+  const message = error?.message || String(error || 'Error desconocido.');
+  const embed = makeEmbed('⚠️ Algo salió mal', message, COLORS.error);
+  await replySmart(interaction, { embeds: [embed] }, true);
+}
+
+async function handlePlayCommand(interaction) {
+  const query = interaction.options.getString('cancion', true);
+  await interaction.deferReply({ ephemeral: CONFIG.PRIVATE_COMMAND_RESPONSES });
+  const state = getState(interaction.guild.id);
+  state.lastTextChannelId = interaction.channelId;
+  await ensureVoiceConnection(interaction);
+
+  const maxItems = looksLikePlaylist(query) ? CONFIG.MAX_PLAYLIST_ITEMS : 1;
+  const tracks = (await resolveInput(query, maxItems)).map((track) => attachRequester(track, interaction));
+  const accepted = enqueueTracks(state, tracks);
+  const first = accepted[0];
+  const embed = makeEmbed(
+    '✅ Agregado a la cola',
+    accepted.length === 1
+      ? `**${first.title}**\nPlataforma: **${first.platform}**\nCola actual: **${state.queue.length + (state.current ? 1 : 0)}**`
+      : `Se agregaron **${accepted.length}** canciones.\nLímite de playlist: **${CONFIG.MAX_PLAYLIST_ITEMS}**\nCola actual: **${state.queue.length + (state.current ? 1 : 0)}**`,
+    COLORS.ok,
+  );
+  await replySmart(interaction, { embeds: [embed] }, CONFIG.PRIVATE_COMMAND_RESPONSES);
+  if (!state.current && state.player.state.status !== AudioPlayerStatus.Playing) await playNext(state);
+  else await refreshPanelByState(state, 'playing');
+}
+
+async function handleSearchCommand(interaction) {
+  const query = interaction.options.getString('cancion', true);
+  await interaction.deferReply({ ephemeral: true });
+  const results = await youtubeSearch(query, 5);
+  if (!results.length) throw new Error('No encontré resultados para esa búsqueda.');
+  const id = createSession(results.map((track) => attachRequester(track, interaction)), interaction.user.id, 'search');
+  const embed = makeEmbed('🔎 Resultados privados', results.map((t, i) => `**${i + 1}.** ${t.title}\n${formatDuration(t.duration)} · ${t.platform}`).join('\n\n'));
+  const row = new ActionRowBuilder().addComponents(results.map((_, i) => new ButtonBuilder()
+    .setCustomId(`search:${id}:${i}`)
+    .setLabel(`Elegir ${i + 1}`)
+    .setStyle(ButtonStyle.Primary)));
+  await replySmart(interaction, { embeds: [embed], components: [row] }, true);
+}
+
+function createSession(tracks, userId, type) {
+  const id = crypto.randomBytes(5).toString('hex');
+  buttonSessions.set(id, { tracks, userId, type, createdAt: Date.now() });
+  setTimeout(() => buttonSessions.delete(id), 10 * 60 * 1000).unref?.();
+  return id;
+}
+
+async function makeRecommendations(seedText, count = CONFIG.RECOMMENDATION_COUNT) {
+  const query = `${seedText} canciones similares recomendadas`;
+  return youtubeSearch(query, count);
+}
+
+async function handleRecommendationsCommand(interaction, similarMode = false) {
+  await interaction.deferReply({ ephemeral: true });
+  const state = getState(interaction.guild.id);
+  const typed = interaction.options?.getString('cancion', false);
+  const seed = typed || state.current?.title || state.recommendationSeed?.title;
+  if (!seed) throw new Error('No tengo una canción base todavía. Escribe un nombre o reproduce algo primero.');
+  const results = (await makeRecommendations(seed)).map((track) => attachRequester(track, interaction));
+  if (!results.length) throw new Error('No encontré recomendaciones ahora mismo.');
+  await sendRecommendationButtons(interaction, results, similarMode ? `🎧 Similares a: ${seed}` : `✨ Recomendados para: ${seed}`);
+}
+
+async function sendRecommendationButtons(interaction, results, title) {
+  const id = createSession(results, interaction.user.id, 'recommendations');
+  const embed = makeEmbed(title, results.map((t, i) => `**${i + 1}.** ${t.title}\n${formatDuration(t.duration)} · ${t.platform}`).join('\n\n'));
+  const rows = [];
+  for (let i = 0; i < results.length; i += 5) {
+    rows.push(new ActionRowBuilder().addComponents(results.slice(i, i + 5).map((_, offset) => {
+      const index = i + offset;
+      return new ButtonBuilder()
+        .setCustomId(`rec:${id}:${index}`)
+        .setLabel(`Agregar ${index + 1}`)
+        .setEmoji('➕')
+        .setStyle(ButtonStyle.Success);
+    })));
+  }
+  await replySmart(interaction, { embeds: [embed], components: rows }, true);
+}
+
+async function handleQueueCommand(interaction) {
+  const state = getState(interaction.guild.id);
+  const lines = [];
+  if (state.current) lines.push(`🎵 **Actual:** ${state.current.title}`);
+  if (state.queue.length) {
+    lines.push(...state.queue.slice(0, 15).map((t, i) => `**${i + 1}.** ${t.title} · ${formatDuration(t.duration)}`));
+    if (state.queue.length > 15) lines.push(`…y ${state.queue.length - 15} más.`);
+  }
+  const embed = makeEmbed('📜 Cola privada', lines.length ? lines.join('\n') : 'La cola está vacía.');
+  await replySmart(interaction, { embeds: [embed] }, true);
+}
+
+async function handleNowPlaying(interaction) {
+  const state = getState(interaction.guild.id);
+  if (!state.current) return replySmart(interaction, { embeds: [makeEmbed('💤 Nada sonando', 'Usa **/play** para empezar.', COLORS.warn)] }, true);
+  const embed = makePanelEmbed(state, 'playing');
+  await replySmart(interaction, { embeds: [embed] }, CONFIG.PRIVATE_COMMAND_RESPONSES);
+}
+
+async function handleSkip(interaction) {
+  const state = getState(interaction.guild.id);
+  if (!state.current) throw new Error('No hay canción sonando para saltar.');
+  const skipped = state.current.title;
+  killCurrentProcesses(state);
+  state.player.stop(true);
+  await replySmart(interaction, { embeds: [makeEmbed('⏭️ Canción saltada', `Se saltó **${skipped}**.`, COLORS.ok)] }, CONFIG.PRIVATE_COMMAND_RESPONSES);
+}
+
+async function handleStop(interaction) {
+  const state = getState(interaction.guild.id);
+  state.queue = [];
+  state.current = null;
+  killCurrentProcesses(state);
+  state.player.stop(true);
+  await setPresenceIdle();
+  await refreshPanelByState(state, 'idle');
+  scheduleVoiceTimeout(state);
+  await replySmart(interaction, { embeds: [makeEmbed('⏹️ Reproducción detenida', 'Cola limpiada sin spamear el canal.', COLORS.ok)] }, CONFIG.PRIVATE_COMMAND_RESPONSES);
+}
+
+async function handlePause(interaction) {
+  const state = getState(interaction.guild.id);
+  if (!state.current) throw new Error('No hay canción sonando.');
+  const ok = state.player.pause(true);
+  await replySmart(interaction, { embeds: [makeEmbed('⏸️ Pausa', ok ? 'Música pausada.' : 'No pude pausar ahora mismo.', ok ? COLORS.ok : COLORS.warn)] }, true);
+  await refreshPanelByState(state, 'playing');
+}
+
+async function handleResume(interaction) {
+  const state = getState(interaction.guild.id);
+  const ok = state.player.unpause();
+  await replySmart(interaction, { embeds: [makeEmbed('▶️ Reanudar', ok ? 'Música reanudada.' : 'No hay nada pausado para reanudar.', ok ? COLORS.ok : COLORS.warn)] }, true);
+  await refreshPanelByState(state, 'playing');
+}
+
+async function handleVolume(interaction) {
+  const state = getState(interaction.guild.id);
+  const volume = interaction.options.getInteger('porcentaje', true);
+  state.volume = volume;
+  const resource = state.player.state.resource;
+  if (resource?.volume) resource.volume.setVolume(Math.max(0, Math.min(2, volume / 100)));
+  await replySmart(interaction, { embeds: [makeEmbed('🔊 Volumen actualizado', `Volumen: **${volume}%**`, COLORS.ok)] }, CONFIG.PRIVATE_COMMAND_RESPONSES);
+  await refreshPanelByState(state, 'playing');
+}
+
+async function handleLeave(interaction) {
+  const state = getState(interaction.guild.id);
+  state.queue = [];
+  state.current = null;
+  killCurrentProcesses(state);
+  state.player.stop(true);
+  try { state.connection?.destroy(); } catch {}
+  state.connection = null;
+  await setPresenceIdle();
+  await replySmart(interaction, { embeds: [makeEmbed('👋 Salí del canal de voz', 'Listo. Usa **/play** para llamarme de nuevo.', COLORS.ok)] }, CONFIG.PRIVATE_COMMAND_RESPONSES);
+}
+
+async function handleTestVoice(interaction) {
+  await interaction.deferReply({ ephemeral: true });
+  await ensureVoiceConnection(interaction);
+  const state = getState(interaction.guild.id);
+  state.lastTextChannelId = interaction.channelId;
+  await replySmart(interaction, { embeds: [makeEmbed('✅ Prueba de voz correcta', 'Pude conectarme al canal de voz.', COLORS.ok)] }, true);
 }
 
 async function handleTestAudio(interaction) {
-  await privateDefer(interaction);
-  try {
-    const state = await connectToVoice(interaction);
-    if (state.cleanup) {
-      try { state.cleanup(); } catch {}
-      state.cleanup = null;
-    }
-    const resource = createTestToneResource(state);
-    resource.volume?.setVolume(clamp(state.volume, 1, 150) / 100);
-    state.current = null;
-    state.player.play(resource);
-    await interaction.editReply({ embeds: [baseEmbed('Prueba de audio enviada', 'Estoy reproduciendo un tono corto de 4 segundos.\n\nSi no escuchas nada, revisa en Discord que el bot no esté silenciado, que tenga volumen arriba y que el canal permita **Hablar**.\nSi sí se escucha, el problema está en el stream de la canción y no en Discord Voice.')] });
-  } catch (err) {
-    return interaction.editReply({ embeds: [baseEmbed('Falló la prueba de audio', cut(err.message || String(err), 500))] });
+  await interaction.deferReply({ ephemeral: true });
+  const state = getState(interaction.guild.id);
+  if (state.current) throw new Error('Hay música sonando ahora. Para no interrumpir a todos, usa /pause o /stop antes de /testaudio.');
+  state.lastTextChannelId = interaction.channelId;
+  await ensureVoiceConnection(interaction);
+  clearVoiceTimeout(state);
+  state.testMode = true;
+  const resource = createToneResource(state);
+  if (resource.volume) resource.volume.setVolume(Math.max(0, Math.min(2, state.volume / 100)));
+  state.player.play(resource);
+  await replySmart(interaction, { embeds: [makeEmbed('🔊 Prueba de audio', 'Reproduciendo un tono corto de 2 segundos.', COLORS.ok)] }, true);
+}
+
+function checkBinary(binary, arg = '-version') {
+  const out = spawnSync(binary, [arg], { encoding: 'utf8' });
+  return { ok: out.status === 0, text: (out.stdout || out.stderr || '').split('\n')[0] || 'Sin salida' };
+}
+
+async function handleDiagnostic(interaction) {
+  await interaction.deferReply({ ephemeral: true });
+  const state = getState(interaction.guild.id);
+  const ffmpeg = checkBinary(CONFIG.FFMPEG_BIN, '-version');
+  const ytdlp = checkBinary(CONFIG.YTDLP_BIN, '--version');
+  const me = interaction.guild.members.me || await interaction.guild.members.fetchMe();
+  const channel = interaction.channel;
+  const channelPerms = channel?.permissionsFor(me);
+  const voiceChannel = interaction.member?.voice?.channel;
+  const voicePerms = voiceChannel?.permissionsFor(me);
+  const connection = getVoiceConnection(interaction.guild.id) || state.connection;
+
+  const fields = [
+    { name: '🔐 Token detectado', value: CONFIG.DISCORD_TOKEN ? '✅ Sí' : '❌ No', inline: true },
+    { name: '🆔 GUILD_ID detectado', value: CONFIG.GUILD_ID ? `✅ ${CONFIG.GUILD_ID}` : '❌ No', inline: true },
+    { name: '🎛️ ffmpeg disponible', value: ffmpeg.ok ? `✅ ${ffmpeg.text}` : '❌ No detectado', inline: false },
+    { name: '📥 yt-dlp disponible', value: ytdlp.ok ? `✅ ${ytdlp.text}` : '❌ No detectado', inline: false },
+    { name: '🔊 Conexión de voz', value: connection ? `✅ ${connection.state.status}` : '⚠️ Sin conexión activa', inline: true },
+    { name: '🧩 Versión del bot', value: BOT_VERSION, inline: true },
+    { name: '📌 Permisos texto', value: [
+      channelPerms?.has(PermissionFlagsBits.ViewChannel) ? '✅ Ver canales' : '❌ Ver canales',
+      channelPerms?.has(PermissionFlagsBits.SendMessages) ? '✅ Enviar mensajes' : '❌ Enviar mensajes',
+      channelPerms?.has(PermissionFlagsBits.EmbedLinks) ? '✅ Insertar enlaces' : '❌ Insertar enlaces',
+      channelPerms?.has(PermissionFlagsBits.ReadMessageHistory) ? '✅ Leer historial' : '❌ Leer historial',
+    ].join('\n'), inline: true },
+    { name: '🎙️ Permisos voz', value: voiceChannel ? [
+      voicePerms?.has(PermissionFlagsBits.Connect) ? '✅ Conectarse' : '❌ Conectarse',
+      voicePerms?.has(PermissionFlagsBits.Speak) ? '✅ Hablar' : '❌ Hablar',
+      voicePerms?.has(PermissionFlagsBits.UseVAD) ? '✅ Usar actividad de voz' : '❌ Usar actividad de voz',
+    ].join('\n') : '⚠️ Entra a un canal de voz para revisar permisos de voz.', inline: true },
+  ];
+
+  const embed = makeEmbed('🧪 Diagnóstico JUANPLAY', 'Revisión rápida para Railway y Discord.', ffmpeg.ok && ytdlp.ok && CONFIG.DISCORD_TOKEN && CONFIG.GUILD_ID ? COLORS.ok : COLORS.warn)
+    .addFields(fields);
+  await replySmart(interaction, { embeds: [embed] }, true);
+}
+
+function profileText() {
+  return [
+    `${CONFIG.DEFAULT_EMOJI} ${CONFIG.BOT_BRAND} — Bot de música para Discord`,
+    '',
+    `${CONFIG.BOT_BRAND} es un bot de música profesional, decorado y estable para servidores de Discord. Permite reproducir canciones por nombre o link, buscar resultados con botones, manejar cola privada, recomendaciones, panel público editable y diagnóstico completo.`,
+    '',
+    `Desarrollador/créditos únicos: ${CONFIG.DEVELOPER_NAME}`,
+    '',
+    'Comandos principales:',
+    '/play, /juanplay, /buscar, /recomendados, /similares, /queue, /nowplaying, /skip, /stop, /pause, /resume, /volume, /leave, /testvoz, /testaudio, /diagnostico, /perfil, /creditos, /help',
+    '',
+    'Permisos recomendados:',
+    'Ver canales, Enviar mensajes, Insertar enlaces, Leer historial de mensajes, Usar comandos de aplicación, Conectarse, Hablar y Usar actividad de voz.',
+  ].join('\n');
+}
+
+async function handleProfile(interaction) {
+  const embed = makeEmbed('📝 Perfil recomendado para Discord Developer Portal', `\`\`\`\n${profileText().slice(0, 3500)}\n\`\`\``);
+  await replySmart(interaction, { embeds: [embed] }, true);
+}
+
+async function handleCredits(interaction) {
+  const embed = makeEmbed('👑 Créditos oficiales', `**${CONFIG.BOT_BRAND}** fue creado y personalizado por **${CONFIG.DEVELOPER_NAME}**.\n\nDiseño profesional, panel público editable, respuestas privadas anti-spam y música con yt-dlp + ffmpeg.`, CONFIG.BOT_COLOR);
+  await replySmart(interaction, { embeds: [embed] }, CONFIG.PRIVATE_COMMAND_RESPONSES);
+}
+
+async function handleHelp(interaction) {
+  const embed = makeEmbed('📖 Ayuda de JUANPLAY', 'Bot de música profesional para Discord, creado por DEVJUANCHO.')
+    .addFields(
+      { name: '🎵 Música', value: '`/play`, `/juanplay`, `/buscar`, `/recomendados`, `/similares`', inline: false },
+      { name: '🎚️ Control', value: '`/pause`, `/resume`, `/skip`, `/stop`, `/volume`, `/leave`', inline: false },
+      { name: '📜 Información', value: '`/queue`, `/nowplaying`, `/perfil`, `/creditos`, `/help`', inline: false },
+      { name: '🧪 Pruebas', value: '`/diagnostico`, `/testvoz`, `/testaudio`', inline: false },
+      { name: '💡 Uso rápido', value: 'Entra a un canal de voz y escribe `/play cancion:<nombre o link>`.', inline: false },
+    );
+  await replySmart(interaction, { embeds: [embed] }, true);
+}
+
+async function handleCommand(interaction) {
+  const cooldown = isOnCooldown(interaction);
+  if (cooldown) {
+    return replySmart(interaction, { embeds: [makeEmbed('⏳ Cooldown anti-spam', `Espera **${cooldown}s** antes de volver a usar este comando.`, COLORS.warn)] }, true);
+  }
+
+  switch (interaction.commandName) {
+    case 'play':
+    case 'juanplay': return handlePlayCommand(interaction);
+    case 'buscar': return handleSearchCommand(interaction);
+    case 'recomendados': return handleRecommendationsCommand(interaction, false);
+    case 'similares': return handleRecommendationsCommand(interaction, true);
+    case 'queue': return handleQueueCommand(interaction);
+    case 'nowplaying': return handleNowPlaying(interaction);
+    case 'skip': return handleSkip(interaction);
+    case 'stop': return handleStop(interaction);
+    case 'pause': return handlePause(interaction);
+    case 'resume': return handleResume(interaction);
+    case 'volume': return handleVolume(interaction);
+    case 'leave': return handleLeave(interaction);
+    case 'testvoz': return handleTestVoice(interaction);
+    case 'testaudio': return handleTestAudio(interaction);
+    case 'diagnostico': return handleDiagnostic(interaction);
+    case 'perfil': return handleProfile(interaction);
+    case 'creditos': return handleCredits(interaction);
+    case 'help': return handleHelp(interaction);
+    default: throw new Error('Comando no reconocido.');
   }
 }
 
-const commands = [
-  new SlashCommandBuilder()
-    .setName('play')
-    .setDescription('Pon música por nombre o link.')
-    .addStringOption((o) => o.setName('cancion').setDescription('Nombre, link de YouTube, SoundCloud, Spotify, Apple, Deezer o audio directo.').setRequired(true).setAutocomplete(true)),
-  new SlashCommandBuilder()
-    .setName('juanplay')
-    .setDescription('Comando personalizado de JUANPLAY para poner música.')
-    .addStringOption((o) => o.setName('cancion').setDescription('Nombre o link de la canción.').setRequired(true).setAutocomplete(true)),
-  new SlashCommandBuilder()
-    .setName('buscar')
-    .setDescription('Busca canciones y muestra botones privados para elegir.')
-    .addStringOption((o) => o.setName('texto').setDescription('Texto a buscar.').setRequired(true).setAutocomplete(true)),
-  new SlashCommandBuilder()
-    .setName('recomendados')
-    .setDescription('Muestra recomendaciones privadas sin spamear el canal.')
-    .addStringOption((o) => o.setName('base').setDescription('Canción/artista base opcional.').setRequired(false).setAutocomplete(true)),
-  new SlashCommandBuilder().setName('similares').setDescription('Recomendaciones privadas basadas en lo que está sonando o el historial.'),
-  new SlashCommandBuilder().setName('queue').setDescription('Muestra la cola en privado.'),
-  new SlashCommandBuilder().setName('nowplaying').setDescription('Muestra lo que suena ahora en privado.'),
-  new SlashCommandBuilder().setName('skip').setDescription('Salta la canción actual.'),
-  new SlashCommandBuilder().setName('stop').setDescription('Detiene la música y limpia la cola.'),
-  new SlashCommandBuilder().setName('pause').setDescription('Pausa la música.'),
-  new SlashCommandBuilder().setName('resume').setDescription('Continúa la música.'),
-  new SlashCommandBuilder().setName('leave').setDescription('Saca el bot del canal de voz.'),
-  new SlashCommandBuilder()
-    .setName('volume')
-    .setDescription('Cambia el volumen del bot.')
-    .addIntegerOption((o) => o.setName('nivel').setDescription('Volumen de 1 a 150.').setRequired(true).setMinValue(1).setMaxValue(150)),
-  new SlashCommandBuilder().setName('testvoz').setDescription('Prueba que el bot pueda entrar al canal de voz.'),
-  new SlashCommandBuilder().setName('testaudio').setDescription('Reproduce un tono corto para confirmar que el bot sí se escucha.'),
-  new SlashCommandBuilder().setName('diagnostico').setDescription('Revisa FFmpeg, yt-dlp, Opus, conexión y estado.'),
-  new SlashCommandBuilder().setName('perfil').setDescription('Texto recomendado para el perfil/descripción del bot.'),
-  new SlashCommandBuilder().setName('creditos').setDescription('Créditos oficiales de JUANPLAY.'),
-  new SlashCommandBuilder().setName('help').setDescription('Ayuda de JUANPLAY.'),
-  new SlashCommandBuilder().setName('ping').setDescription('Prueba rápida del bot.')
-];
+async function handleButton(interaction) {
+  const state = getState(interaction.guild.id);
+  state.lastTextChannelId = interaction.channelId;
 
-async function registerCommands() {
-  const rest = new REST({ version: '10' }).setToken(CONFIG.token);
-  const body = commands.map((cmd) => cmd.toJSON());
-  if (CONFIG.guildId) {
-    await rest.put(Routes.applicationGuildCommands(client.user.id, CONFIG.guildId), { body });
-    console.log(`[JUANPLAY] Comandos registrados en servidor ${CONFIG.guildId}`);
-  } else {
-    await rest.put(Routes.applicationCommands(client.user.id), { body });
-    console.log('[JUANPLAY] Comandos globales registrados. Pueden tardar en aparecer.');
+  if (interaction.customId === 'jp_pause') return handlePause(interaction);
+  if (interaction.customId === 'jp_resume') return handleResume(interaction);
+  if (interaction.customId === 'jp_skip') return handleSkip(interaction);
+  if (interaction.customId === 'jp_stop') return handleStop(interaction);
+  if (interaction.customId === 'jp_queue') return handleQueueCommand(interaction);
+  if (interaction.customId === 'jp_rec') {
+    await interaction.deferReply({ ephemeral: true });
+    const seed = state.current?.title || state.recommendationSeed?.title;
+    if (!seed) throw new Error('Todavía no tengo una canción base para recomendar.');
+    const results = (await makeRecommendations(seed)).map((track) => attachRequester(track, interaction));
+    return sendRecommendationButtons(interaction, results, `✨ Recomendados para: ${seed}`);
   }
+
+  const [type, sessionId, indexRaw] = interaction.customId.split(':');
+  if (!['search', 'rec'].includes(type)) return;
+  const session = buttonSessions.get(sessionId);
+  if (!session) throw new Error('Este menú expiró. Usa el comando otra vez.');
+  if (session.userId !== interaction.user.id) throw new Error('Estos botones son privados para quien abrió el menú.');
+  const index = Number.parseInt(indexRaw, 10);
+  const track = session.tracks[index];
+  if (!track) throw new Error('No encontré esa opción.');
+
+  await interaction.deferReply({ ephemeral: true });
+  await ensureVoiceConnection(interaction);
+  const enriched = attachRequester(track, interaction);
+  const accepted = enqueueTracks(state, [enriched]);
+  await replySmart(interaction, { embeds: [makeEmbed('✅ Canción agregada', `**${accepted[0].title}** fue agregada a la cola.`, COLORS.ok)] }, true);
+  if (!state.current && state.player.state.status !== AudioPlayerStatus.Playing) await playNext(state);
+  else await refreshPanelByState(state, 'playing');
 }
 
-client.once(Events.ClientReady, async () => {
-  console.log(`✅ ${CONFIG.brand} conectado como ${client.user.tag}`);
-  console.log(`🔗 ID de la app/bot: ${client.user.id}`);
-  console.log(`🎧 Desarrollador: ${CONFIG.developer}`);
-  setIdlePresence();
+client.once('ready', async () => {
+  console.log(`[JUANPLAY] Conectado como ${client.user.tag}.`);
+  await setPresenceStartup();
   try {
     await registerCommands();
-    console.log('✅ Comandos slash listos.');
-  } catch (err) {
-    console.error('[JUANPLAY] Error registrando comandos:', err);
+  } catch (error) {
+    console.error('[JUANPLAY] No se pudieron registrar comandos:', error.message);
   }
 });
 
-client.on(Events.InteractionCreate, async (interaction) => {
+client.on('interactionCreate', async (interaction) => {
   try {
     if (interaction.isAutocomplete()) {
       const focused = interaction.options.getFocused(true);
-      const choices = await autocompleteVideos(focused.value);
-      return interaction.respond(choices.slice(0, 10)).catch(() => {});
+      if (focused?.name === 'cancion') {
+        const choices = await autocompleteSearch(focused.value);
+        return interaction.respond(choices).catch(() => {});
+      }
+      return interaction.respond([]).catch(() => {});
     }
 
-    if (interaction.isButton()) return handleButton(interaction);
+    if (!interaction.inGuild()) {
+      return replySmart(interaction, 'JUANPLAY solo funciona dentro de servidores de Discord.', true);
+    }
 
-    if (!interaction.isChatInputCommand()) return;
-
-    const { commandName } = interaction;
-    if (commandName === 'play' || commandName === 'juanplay') {
-      return handlePlay(interaction, interaction.options.getString('cancion', true));
-    }
-    if (commandName === 'buscar') {
-      return handleSearch(interaction, interaction.options.getString('texto', true), 'Busca y elige en privado');
-    }
-    if (commandName === 'recomendados' || commandName === 'similares') {
-      return handleRecommendations(interaction, interaction.options.getString?.('base') || '');
-    }
-    if (commandName === 'queue') {
-      const state = getState(interaction.guildId);
-      return interaction.reply({ embeds: [queueEmbed(state, interaction.user)], flags: MessageFlags.Ephemeral });
-    }
-    if (commandName === 'nowplaying') {
-      const state = getState(interaction.guildId);
-      return interaction.reply({ embeds: [nowPlayingEmbed(state)], flags: MessageFlags.Ephemeral });
-    }
-    if (commandName === 'pause') {
-      const state = getState(interaction.guildId);
-      state.player.pause();
-      await updatePanel(state, 'playing');
-      return interaction.reply({ content: '⏸️ Pausado.', flags: MessageFlags.Ephemeral });
-    }
-    if (commandName === 'resume') {
-      const state = getState(interaction.guildId);
-      state.player.unpause();
-      await updatePanel(state, 'playing');
-      return interaction.reply({ content: '▶️ Siguiendo.', flags: MessageFlags.Ephemeral });
-    }
-    if (commandName === 'skip') {
-      const state = getState(interaction.guildId);
-      state.player.stop(true);
-      return interaction.reply({ content: '⏭️ Saltando.', flags: MessageFlags.Ephemeral });
-    }
-    if (commandName === 'stop') {
-      const state = getState(interaction.guildId);
-      state.queue = [];
-      state.player.stop(true);
-      if (state.connection) {
-        try { state.connection.destroy(); } catch {}
-        state.connection = null;
-      }
-      state.current = null;
-      setIdlePresence();
-      await updatePanel(state, 'ended');
-      return interaction.reply({ content: '🛑 Música detenida y cola limpiada.', flags: MessageFlags.Ephemeral });
-    }
-    if (commandName === 'leave') {
-      const state = getState(interaction.guildId);
-      state.queue = [];
-      state.player.stop(true);
-      if (state.connection) {
-        try { state.connection.destroy(); } catch {}
-        state.connection = null;
-      }
-      state.current = null;
-      setIdlePresence();
-      return interaction.reply({ content: '👋 Salí del canal de voz.', flags: MessageFlags.Ephemeral });
-    }
-    if (commandName === 'volume') {
-      const state = getState(interaction.guildId);
-      const level = interaction.options.getInteger('nivel', true);
-      state.volume = clamp(level, 1, 150);
-      const resource = state.player.state.resource;
-      resource?.volume?.setVolume(state.volume / 100);
-      await updatePanel(state, 'playing');
-      return interaction.reply({ content: `🔊 Volumen cambiado a ${state.volume}%.`, flags: MessageFlags.Ephemeral });
-    }
-    if (commandName === 'testvoz') {
-      await interaction.deferReply({ flags: MessageFlags.Ephemeral });
-      try {
-        const state = await connectToVoice(interaction);
-        return interaction.editReply({ embeds: [baseEmbed('Prueba de voz correcta', `Entré al canal de voz y quedé en estado: **${state.connection.state.status}**.\nAhora prueba /play.`)] });
-      } catch (err) {
-        return interaction.editReply({ embeds: [baseEmbed('Falló la prueba de voz', cut(err.message || String(err), 500))] });
-      }
-    }
-    if (commandName === 'testaudio') {
-      return handleTestAudio(interaction);
-    }
-    if (commandName === 'diagnostico') {
-      await interaction.deferReply({ flags: MessageFlags.Ephemeral });
-      return interaction.editReply({ embeds: [await diagnosticsEmbed(interaction)] });
-    }
-    if (commandName === 'perfil') {
-      const desc = `**Nombre recomendado:** ${CONFIG.brand}\n\n` +
-        `**Descripción / About Me:**\n` +
-        `🎵 ${CONFIG.brand} — música con comandos slash, búsqueda, cola, recomendados privados y panel limpio para servidores públicos.\n` +
-        `Desarrollador único: ${CONFIG.developer}.\n\n` +
-        `La descripción real del perfil se cambia en Discord Developer Portal → General Information / Bot. La actividad sí la cambia el código automáticamente con la canción actual.`;
-      return interaction.reply({ embeds: [baseEmbed('Perfil oficial de JUANPLAY', desc)], flags: MessageFlags.Ephemeral });
-    }
-    if (commandName === 'creditos') {
-      return interaction.reply({ embeds: [baseEmbed('Créditos oficiales', `**${CONFIG.brand}**\nDesarrollador único: **${CONFIG.developer}**\nSistema público de música: audio corregido, recomendaciones privadas, panel limpio y actividad dinámica.`)], flags: MessageFlags.Ephemeral });
-    }
-    if (commandName === 'help') {
-      const desc = `**Música**\n` +
-        '`/play` o `/juanplay` nombre/link\n' +
-        '`/buscar` resultados con botones privados\n' +
-        '`/recomendados` y `/similares` solo para ti\n\n' +
-        `**Control**\n` +
-        '`/pause`, `/resume`, `/skip`, `/stop`, `/leave`, `/volume`\n\n' +
-        `**Info**\n` +
-        '`/queue`, `/nowplaying`, `/testvoz`, `/testaudio`, `/diagnostico`, `/perfil`, `/creditos`\n\n' +
-        `Panel público sin spam + respuestas privadas. Desarrollador: **${CONFIG.developer}**.`;
-      return interaction.reply({ embeds: [baseEmbed('Ayuda de JUANPLAY', desc)], flags: MessageFlags.Ephemeral });
-    }
-    if (commandName === 'ping') {
-      return interaction.reply({ content: `🏓 Pong • ${client.ws.ping}ms • ${CONFIG.brand} by ${CONFIG.developer}`, flags: MessageFlags.Ephemeral });
-    }
-  } catch (err) {
-    console.error('[JUANPLAY] Error ejecutando interacción:', err);
-    const payload = { embeds: [baseEmbed('Error inesperado', cut(err.message || String(err), 500))], flags: MessageFlags.Ephemeral };
-    if (interaction.isRepliable()) {
-      if (interaction.deferred || interaction.replied) await interaction.followUp(payload).catch(() => {});
-      else await interaction.reply(payload).catch(() => {});
-    }
+    if (interaction.isChatInputCommand()) return await handleCommand(interaction);
+    if (interaction.isButton()) return await handleButton(interaction);
+  } catch (error) {
+    console.error('[JUANPLAY] Error en interacción:', error?.message || error);
+    await errorReply(interaction, error);
   }
 });
 
-process.on('unhandledRejection', (err) => {
-  console.error('[JUANPLAY] Unhandled rejection:', err);
-});
+process.on('unhandledRejection', (error) => console.error('[JUANPLAY] unhandledRejection:', error));
+process.on('uncaughtException', (error) => console.error('[JUANPLAY] uncaughtException:', error));
 
-process.on('SIGTERM', () => {
-  for (const child of pendingProcesses) {
-    try { child.kill('SIGKILL'); } catch {}
-  }
-  client.destroy();
-  process.exit(0);
-});
+if (!CONFIG.DISCORD_TOKEN) {
+  console.error('[JUANPLAY] Falta DISCORD_TOKEN. Agrega la variable en Railway sin comillas.');
+  process.exit(1);
+}
+if (!CONFIG.GUILD_ID) {
+  console.error('[JUANPLAY] Falta GUILD_ID. Agrega la variable en Railway sin comillas.');
+  process.exit(1);
+}
 
-client.login(CONFIG.token);
+client.login(CONFIG.DISCORD_TOKEN);
