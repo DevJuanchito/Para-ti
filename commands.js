@@ -3,15 +3,15 @@ import { SlashCommandBuilder } from 'discord.js';
 export const slashCommands = [
   new SlashCommandBuilder()
     .setName('help')
-    .setDescription('Muestra todos los comandos de JUANPLAY.'),
+    .setDescription('Muestra todos los comandos de JUANPLAY DEVJUANCHO.'),
 
   new SlashCommandBuilder()
     .setName('juanplay')
-    .setDescription('Reproduce musica por nombre o enlace de YouTube.')
+    .setDescription('Reproduce musica por nombre o link. Personalizado DEVJUANCHO.')
     .addStringOption(option =>
       option
         .setName('busqueda')
-        .setDescription('Nombre de la cancion o URL de YouTube')
+        .setDescription('Nombre, link de YouTube, Spotify, SoundCloud, Apple, Deezer o audio directo')
         .setRequired(true)
     ),
 
@@ -21,7 +21,17 @@ export const slashCommands = [
     .addStringOption(option =>
       option
         .setName('busqueda')
-        .setDescription('Nombre de la cancion o URL de YouTube')
+        .setDescription('Nombre o enlace de musica')
+        .setRequired(true)
+    ),
+
+  new SlashCommandBuilder()
+    .setName('buscar')
+    .setDescription('Busca canciones por nombre y muestra resultados.')
+    .addStringOption(option =>
+      option
+        .setName('busqueda')
+        .setDescription('Nombre de la cancion')
         .setRequired(true)
     ),
 
@@ -56,6 +66,30 @@ export const slashCommands = [
   new SlashCommandBuilder()
     .setName('testvoz')
     .setDescription('Prueba si JUANPLAY puede conectarse a tu canal de voz.'),
+
+  new SlashCommandBuilder()
+    .setName('volume')
+    .setDescription('Cambia el volumen de JUANPLAY.')
+    .addIntegerOption(option =>
+      option
+        .setName('nivel')
+        .setDescription('Volumen de 1 a 150')
+        .setRequired(true)
+        .setMinValue(1)
+        .setMaxValue(150)
+    ),
+
+  new SlashCommandBuilder()
+    .setName('plataformas')
+    .setDescription('Muestra las plataformas soportadas.'),
+
+  new SlashCommandBuilder()
+    .setName('diagnostico')
+    .setDescription('Revisa el estado del bot y variables importantes.'),
+
+  new SlashCommandBuilder()
+    .setName('creditos')
+    .setDescription('Muestra los creditos DEVJUANCHO.'),
 
   new SlashCommandBuilder()
     .setName('ping')

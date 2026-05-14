@@ -1,12 +1,13 @@
 {
-  "name": "juanplay-bot",
-  "version": "3.0.0",
-  "description": "JUANPLAY - Bot de musica para Discord con slash commands, busqueda por nombre y enlaces de YouTube listo para Railway",
+  "name": "juanplay-devjuancho-bot",
+  "version": "4.0.0",
+  "description": "JUANPLAY DEVJUANCHO - Bot de musica para Discord con comandos slash, YouTube, SoundCloud, Spotify/Apple/Deezer por busqueda y enlaces directos.",
   "type": "module",
   "main": "index.js",
   "scripts": {
     "start": "node index.js",
-    "register": "node deploy-commands.js"
+    "check": "node --check index.js",
+    "register": "node index.js"
   },
   "engines": {
     "node": ">=20"
@@ -18,6 +19,7 @@
     "ffmpeg-static": "5.2.0",
     "libsodium-wrappers": "0.7.15",
     "opusscript": "0.1.1",
+    "play-dl": "1.9.7",
     "yt-search": "2.13.1",
     "ytpl": "2.3.0"
   }
