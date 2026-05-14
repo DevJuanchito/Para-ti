@@ -19,8 +19,8 @@ function readLocalConfig() {
 
 function getValue(localConfig, ...keys) {
   for (const key of keys) {
-    if (process.env[key] && String(process.env[key]).trim() !== '') return process.env[key];
-    if (localConfig[key] && String(localConfig[key]).trim() !== '') return localConfig[key];
+    if (process.env[key] && String(process.env[key]).trim() !== '') return String(process.env[key]).trim();
+    if (localConfig[key] && String(localConfig[key]).trim() !== '') return String(localConfig[key]).trim();
   }
   return '';
 }
@@ -28,6 +28,11 @@ function getValue(localConfig, ...keys) {
 function asBoolean(value, defaultValue = false) {
   if (value === undefined || value === null || value === '') return defaultValue;
   return ['1', 'true', 'yes', 'si', 'sí', 'on'].includes(String(value).toLowerCase());
+}
+
+function asNumber(value, defaultValue) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : defaultValue;
 }
 
 const localConfig = readLocalConfig();
@@ -38,8 +43,10 @@ export const config = {
   guildId: getValue(localConfig, 'GUILD_ID', 'DISCORD_GUILD_ID'),
   prefix: getValue(localConfig, 'PREFIX') || '!',
   enablePrefixCommands: asBoolean(getValue(localConfig, 'ENABLE_PREFIX_COMMANDS'), false),
-  maxPlaylistSongs: Number(getValue(localConfig, 'MAX_PLAYLIST_SONGS')) || 25,
-  staySeconds: Number(getValue(localConfig, 'STAY_SECONDS')) || 60
+  maxPlaylistSongs: asNumber(getValue(localConfig, 'MAX_PLAYLIST_SONGS'), 20),
+  staySeconds: asNumber(getValue(localConfig, 'STAY_SECONDS'), 90),
+  voiceTimeoutMs: asNumber(getValue(localConfig, 'VOICE_TIMEOUT_MS'), 60_000),
+  youtubeCookie: getValue(localConfig, 'YOUTUBE_COOKIE')
 };
 
 export function requireToken() {
@@ -48,4 +55,15 @@ export function requireToken() {
       'Falta configurar DISCORD_TOKEN. En Railway ve a Variables y agrega DISCORD_TOKEN con el token de tu bot.'
     );
   }
+}
+
+export function getYtdlRequestOptions() {
+  if (!config.youtubeCookie) return {};
+  return {
+    requestOptions: {
+      headers: {
+        cookie: config.youtubeCookie
+      }
+    }
+  };
 }

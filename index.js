@@ -1,15 +1,20 @@
 import ffmpegPath from 'ffmpeg-static';
-import play from 'play-dl';
+import ytdl from '@distube/ytdl-core';
+import ytSearch from 'yt-search';
+import ytpl from 'ytpl';
 import {
   ActivityType,
+  ChannelType,
   Client,
   EmbedBuilder,
+  Events,
   GatewayIntentBits,
   PermissionFlagsBits
 } from 'discord.js';
 import {
   AudioPlayerStatus,
   NoSubscriberBehavior,
+  StreamType,
   VoiceConnectionStatus,
   createAudioPlayer,
   createAudioResource,
@@ -17,13 +22,16 @@ import {
   getVoiceConnection,
   joinVoiceChannel
 } from '@discordjs/voice';
-import { config, requireToken } from './config.js';
+import { config, getYtdlRequestOptions, requireToken } from './config.js';
 import { slashCommandData } from './commands.js';
 
 if (ffmpegPath) process.env.FFMPEG_PATH = ffmpegPath;
 requireToken();
 
-const intents = [GatewayIntentBits.Guilds, GatewayIntentBits.GuildVoiceStates];
+const intents = [
+  GatewayIntentBits.Guilds,
+  GatewayIntentBits.GuildVoiceStates
+];
 
 if (config.enablePrefixCommands) {
   intents.push(GatewayIntentBits.GuildMessages, GatewayIntentBits.MessageContent);
@@ -46,17 +54,8 @@ function errorEmbed(message) {
   return brandEmbed('JUANPLAY aviso', `❌ ${message}`);
 }
 
-function formatDuration(raw) {
-  if (!raw) return 'En vivo / desconocido';
-  if (typeof raw === 'string') return raw;
-  const seconds = Number(raw);
-  if (!Number.isFinite(seconds)) return 'Desconocido';
-  const h = Math.floor(seconds / 3600);
-  const m = Math.floor((seconds % 3600) / 60);
-  const s = Math.floor(seconds % 60);
-  return h > 0
-    ? `${h}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`
-    : `${m}:${String(s).padStart(2, '0')}`;
+function cleanTitle(title) {
+  return title || 'Cancion sin titulo';
 }
 
 function bestThumbnail(thumbnails) {
@@ -64,16 +63,71 @@ function bestThumbnail(thumbnails) {
   return thumbnails[thumbnails.length - 1]?.url ?? thumbnails[0]?.url ?? null;
 }
 
-function cleanTitle(title) {
-  return title || 'Cancion sin titulo';
+function formatDuration(secondsOrString) {
+  if (!secondsOrString) return 'Desconocida';
+  if (typeof secondsOrString === 'string') return secondsOrString;
+
+  const seconds = Number(secondsOrString);
+  if (!Number.isFinite(seconds)) return 'Desconocida';
+
+  const h = Math.floor(seconds / 3600);
+  const m = Math.floor((seconds % 3600) / 60);
+  const s = Math.floor(seconds % 60);
+
+  return h > 0
+    ? `${h}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`
+    : `${m}:${String(s).padStart(2, '0')}`;
 }
 
-function videoToSong(video, requestedBy) {
+function isProbablyUrl(value) {
+  try {
+    const url = new URL(value);
+    return ['http:', 'https:'].includes(url.protocol);
+  } catch {
+    return false;
+  }
+}
+
+function ytdlOptions() {
+  return {
+    filter: 'audioonly',
+    quality: 'highestaudio',
+    highWaterMark: 1 << 25,
+    dlChunkSize: 0,
+    ...getYtdlRequestOptions()
+  };
+}
+
+function infoOptions() {
+  return getYtdlRequestOptions();
+}
+
+function songFromYtdlDetails(details, requestedBy) {
+  return {
+    title: cleanTitle(details.title),
+    url: details.video_url || details.videoUrl || details.url,
+    duration: formatDuration(details.lengthSeconds ? Number(details.lengthSeconds) : details.durationRaw),
+    thumbnail: bestThumbnail(details.thumbnails),
+    requestedBy: requestedBy?.tag || requestedBy?.username || 'Usuario'
+  };
+}
+
+function songFromSearchVideo(video, requestedBy) {
   return {
     title: cleanTitle(video.title),
     url: video.url,
-    duration: video.durationRaw || formatDuration(video.durationInSec),
-    thumbnail: bestThumbnail(video.thumbnails),
+    duration: video.timestamp || formatDuration(video.seconds),
+    thumbnail: video.thumbnail || bestThumbnail(video.thumbnails),
+    requestedBy: requestedBy?.tag || requestedBy?.username || 'Usuario'
+  };
+}
+
+function songFromPlaylistItem(item, requestedBy) {
+  return {
+    title: cleanTitle(item.title),
+    url: item.shortUrl || item.url,
+    duration: item.duration || 'Desconocida',
+    thumbnail: item.bestThumbnail?.url || item.thumbnail || null,
     requestedBy: requestedBy?.tag || requestedBy?.username || 'Usuario'
   };
 }
@@ -82,40 +136,53 @@ async function resolveSongs(query, requestedBy) {
   const search = query.trim();
   if (!search) throw new UserError('Escribe el nombre o URL de una cancion.');
 
-  const type = play.yt_validate(search);
+  // Playlist de YouTube.
+  if (ytpl.validateID(search) && !ytdl.validateURL(search)) {
+    try {
+      const playlist = await ytpl(search, { limit: config.maxPlaylistSongs });
+      const songs = playlist.items
+        .filter(item => item?.url || item?.shortUrl)
+        .map(item => songFromPlaylistItem(item, requestedBy));
 
-  if (type === 'playlist') {
-    const playlist = await play.playlist_info(search, { incomplete: true });
-    const videos = await playlist.all_videos();
-    const limited = videos.slice(0, config.maxPlaylistSongs);
-    if (limited.length === 0) throw new UserError('No encontre canciones en esa playlist.');
-    return limited.map(video => videoToSong(video, requestedBy));
+      if (songs.length === 0) throw new UserError('No encontre canciones reproducibles en esa playlist.');
+      return songs;
+    } catch (error) {
+      if (error instanceof UserError) throw error;
+      console.error('[JUANPLAY] Error leyendo playlist:', error);
+      throw new UserError('No pude leer esa playlist. Prueba con una cancion individual o con otro enlace.');
+    }
   }
 
-  if (type === 'video') {
-    const info = await play.video_basic_info(search);
-    const details = info.video_details;
-    return [
-      {
-        title: cleanTitle(details.title),
-        url: details.url,
-        duration: details.durationRaw || formatDuration(details.durationInSec),
-        thumbnail: bestThumbnail(details.thumbnails),
-        requestedBy: requestedBy?.tag || requestedBy?.username || 'Usuario'
-      }
-    ];
+  // Video directo de YouTube.
+  if (ytdl.validateURL(search)) {
+    try {
+      const info = await ytdl.getBasicInfo(search, infoOptions());
+      return [songFromYtdlDetails(info.videoDetails, requestedBy)];
+    } catch (error) {
+      console.error('[JUANPLAY] Error leyendo enlace de YouTube:', error);
+      throw new UserError('No pude leer ese enlace de YouTube. Prueba con otro link o con el nombre de la cancion.');
+    }
   }
 
-  const results = await play.search(search, {
-    limit: 1,
-    source: { youtube: 'video' }
-  });
-
-  if (!results.length) {
-    throw new UserError('No encontre esa cancion. Prueba con otro nombre o con una URL de YouTube.');
+  if (isProbablyUrl(search)) {
+    throw new UserError('Por ahora solo acepto enlaces de YouTube. Tambien puedes escribir el nombre de la cancion.');
   }
 
-  return [videoToSong(results[0], requestedBy)];
+  // Busqueda por nombre.
+  try {
+    const results = await ytSearch(search);
+    const video = results.videos.find(item => item?.url && !item.live) || results.videos.find(item => item?.url);
+
+    if (!video) {
+      throw new UserError('No encontre esa cancion. Prueba con otro nombre o con una URL de YouTube.');
+    }
+
+    return [songFromSearchVideo(video, requestedBy)];
+  } catch (error) {
+    if (error instanceof UserError) throw error;
+    console.error('[JUANPLAY] Error buscando en YouTube:', error);
+    throw new UserError('No pude buscar en YouTube ahora mismo. Prueba con un enlace directo de YouTube.');
+  }
 }
 
 function getState(guild) {
@@ -135,7 +202,8 @@ function getState(guild) {
       current: null,
       songs: [],
       textChannel: null,
-      leaveTimer: null
+      leaveTimer: null,
+      isConnecting: false
     };
 
     player.on(AudioPlayerStatus.Idle, () => {
@@ -146,7 +214,8 @@ function getState(guild) {
 
     player.on('error', error => {
       console.error('[JUANPLAY] Error del reproductor:', error);
-      sendToTextChannel(state, `⚠️ Error reproduciendo la cancion. Saltando a la siguiente...`).catch(() => {});
+      sendToTextChannel(state, '⚠️ Error reproduciendo la cancion. Saltando a la siguiente...').catch(() => {});
+      state.current = null;
       playNext(guild.id).catch(console.error);
     });
 
@@ -188,6 +257,7 @@ function destroyQueue(guildId, notify = true) {
     clearTimeout(state.leaveTimer);
     state.songs = [];
     state.current = null;
+    state.isConnecting = false;
     state.player.stop(true);
   }
 
@@ -204,16 +274,45 @@ function destroyQueue(guildId, notify = true) {
   queues.delete(guildId);
 }
 
+async function getGuildMember(context) {
+  if (context.member?.voice) return context.member;
+  try {
+    return await context.guild.members.fetch(context.user.id);
+  } catch {
+    return context.member;
+  }
+}
+
+function voiceConnectionErrorMessage(status) {
+  return [
+    'No pude conectarme al canal de voz.',
+    `Estado de conexion: **${status || 'desconocido'}**.`,
+    '',
+    'Revisa esto:',
+    '1. El bot debe tener **Ver canales**, **Conectarse** y **Hablar** en ese canal de voz.',
+    '2. Usa un canal de voz normal, no Stage/escenario.',
+    '3. Si estas en Railway y sigue igual, cambia la region del canal de voz a **Automatico** o prueba otro host que permita voz/UDP.'
+  ].join('\n');
+}
+
 async function connectToUserVoice(context) {
-  const member = context.member;
+  const member = await getGuildMember(context);
   const voiceChannel = member?.voice?.channel;
 
   if (!voiceChannel) {
     throw new UserError('Primero entra a un canal de voz y vuelve a usar el comando.');
   }
 
-  const me = voiceChannel.guild.members.me;
+  if (voiceChannel.type === ChannelType.GuildStageVoice) {
+    throw new UserError('Estoy detectando un canal Stage/escenario. Prueba en un canal de voz normal.');
+  }
+
+  const me = await voiceChannel.guild.members.fetchMe();
   const permissions = voiceChannel.permissionsFor(me);
+
+  if (!permissions?.has(PermissionFlagsBits.ViewChannel)) {
+    throw new UserError('No tengo permiso para ver tu canal de voz.');
+  }
 
   if (!permissions?.has(PermissionFlagsBits.Connect)) {
     throw new UserError('No tengo permiso para conectarme a tu canal de voz.');
@@ -243,10 +342,15 @@ async function connectToUserVoice(context) {
     channelId: voiceChannel.id,
     guildId: context.guild.id,
     adapterCreator: voiceChannel.guild.voiceAdapterCreator,
-    selfDeaf: true
+    selfDeaf: false,
+    selfMute: false
   });
 
+  state.connection = connection;
+  state.isConnecting = true;
+
   connection.on('error', error => console.error('[JUANPLAY] Error de conexion de voz:', error));
+
   connection.on(VoiceConnectionStatus.Disconnected, async () => {
     try {
       await Promise.race([
@@ -258,10 +362,21 @@ async function connectToUserVoice(context) {
     }
   });
 
-  await entersState(connection, VoiceConnectionStatus.Ready, 30_000);
-  connection.subscribe(state.player);
-  state.connection = connection;
-  return state;
+  try {
+    await entersState(connection, VoiceConnectionStatus.Ready, config.voiceTimeoutMs);
+    connection.subscribe(state.player);
+    state.isConnecting = false;
+    return state;
+  } catch (error) {
+    const status = connection.state?.status;
+    console.error('[JUANPLAY] No pude entrar a voz:', { status, error });
+    try {
+      connection.destroy();
+    } catch {}
+    state.connection = null;
+    state.isConnecting = false;
+    throw new UserError(voiceConnectionErrorMessage(status));
+  }
 }
 
 async function playNext(guildId) {
@@ -280,12 +395,19 @@ async function playNext(guildId) {
   state.current = next;
 
   try {
-    const source = await play.stream(next.url, { discordPlayerCompatibility: true });
-    const resource = createAudioResource(source.stream, {
-      inputType: source.type,
-      metadata: next
+    const stream = ytdl(next.url, ytdlOptions());
+
+    stream.on('error', error => {
+      console.error('[JUANPLAY] Error del stream de YouTube:', error);
     });
 
+    const resource = createAudioResource(stream, {
+      inputType: StreamType.Arbitrary,
+      metadata: next,
+      inlineVolume: true
+    });
+
+    resource.volume?.setVolume(0.85);
     state.player.play(resource);
 
     const embed = brandEmbed('🎧 JUANPLAY esta sonando', `[${next.title}](${next.url})`)
@@ -330,14 +452,15 @@ async function safeDefer(context) {
 
 async function commandHelp(context) {
   const prefixLine = config.enablePrefixCommands
-    ? `\n\nTambien puedes usar comandos con prefijo: \`${config.prefix}play\`, \`${config.prefix}skip\`, \`${config.prefix}help\`.`
+    ? `\nTambien puedes usar: \`${config.prefix}play\`, \`${config.prefix}skip\`, \`${config.prefix}help\`.`
     : '';
 
   const embed = brandEmbed(
     '🎵 JUANPLAY comandos',
     [
-      '`/juanplay busqueda` - reproduce musica con nombre unico.',
-      '`/play busqueda` - reproduce una cancion o URL.',
+      '`/juanplay busqueda` - reproduce por nombre o URL de YouTube.',
+      '`/play busqueda` - igual que /juanplay.',
+      '`/testvoz` - prueba conexion al canal de voz.',
       '`/skip` - salta la cancion actual.',
       '`/pause` - pausa.',
       '`/resume` - continua.',
@@ -347,7 +470,7 @@ async function commandHelp(context) {
       '`/leave` - sale del canal.',
       '`/ping` - prueba el bot.',
       prefixLine
-    ].join('\n')
+    ].filter(Boolean).join('\n')
   );
 
   await safeReply(context, { embeds: [embed] });
@@ -356,8 +479,8 @@ async function commandHelp(context) {
 async function commandPlay(context, query) {
   await safeDefer(context);
 
-  const state = await connectToUserVoice(context);
   const songs = await resolveSongs(query, context.user);
+  const state = await connectToUserVoice(context);
   state.songs.push(...songs);
 
   const wasIdle = !state.current && state.player.state.status !== AudioPlayerStatus.Playing;
@@ -372,6 +495,16 @@ async function commandPlay(context, query) {
 
   if (songs.length === 1 && songs[0].thumbnail) embed.setThumbnail(songs[0].thumbnail);
   await safeReply(context, { embeds: [embed] });
+}
+
+async function commandTestVoice(context) {
+  await safeDefer(context);
+  const state = await connectToUserVoice(context);
+  await safeReply(context, {
+    embeds: [brandEmbed('✅ JUANPLAY voz lista', 'Me conecte bien al canal de voz. Ahora prueba `/juanplay nombre de cancion`.')]
+  });
+  scheduleLeave(context.guild.id);
+  return state;
 }
 
 async function commandSkip(context) {
@@ -474,6 +607,9 @@ async function runCommand(context, commandName, args = []) {
           : args.join(' ');
         return await commandPlay(context, query);
       }
+      case 'testvoz':
+      case 'voice':
+        return await commandTestVoice(context);
       case 'skip':
       case 'saltar':
         return await commandSkip(context);
@@ -498,7 +634,7 @@ async function runCommand(context, commandName, args = []) {
       case 'ping':
         return await commandPing(context);
       default:
-        throw new UserError(`Comando no reconocido. Usa \`/help\`.`);
+        throw new UserError('Comando no reconocido. Usa `/help`.');
     }
   } catch (error) {
     const message = error instanceof UserError
@@ -529,12 +665,12 @@ async function registerSlashCommands() {
   }
 }
 
-client.once('ready', async () => {
-  console.log(`✅ JUANPLAY conectado como ${client.user.tag}`);
-  console.log(`🔗 ID de la app/bot: ${client.user.id}`);
-  console.log('🎵 Usa /help o /juanplay en Discord.');
+client.once(Events.ClientReady, async readyClient => {
+  console.log(`✅ JUANPLAY conectado como ${readyClient.user.tag}`);
+  console.log(`🔗 ID de la app/bot: ${readyClient.user.id}`);
+  console.log('🎵 Usa /help, /testvoz o /juanplay en Discord.');
 
-  client.user.setPresence({
+  readyClient.user.setPresence({
     activities: [{ name: 'JUANPLAY /help', type: ActivityType.Listening }],
     status: 'online'
   });
@@ -547,7 +683,7 @@ client.once('ready', async () => {
   }
 });
 
-client.on('guildCreate', async guild => {
+client.on(Events.GuildCreate, async guild => {
   try {
     await registerCommandsForGuild(guild);
   } catch (error) {
@@ -555,7 +691,7 @@ client.on('guildCreate', async guild => {
   }
 });
 
-client.on('interactionCreate', async interaction => {
+client.on(Events.InteractionCreate, async interaction => {
   if (!interaction.isChatInputCommand() || !interaction.guild) return;
 
   await runCommand({
@@ -569,7 +705,7 @@ client.on('interactionCreate', async interaction => {
 });
 
 if (config.enablePrefixCommands) {
-  client.on('messageCreate', async message => {
+  client.on(Events.MessageCreate, async message => {
     if (message.author.bot || !message.guild) return;
     if (!message.content.startsWith(config.prefix)) return;
 

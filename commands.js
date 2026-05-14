@@ -7,7 +7,7 @@ export const slashCommands = [
 
   new SlashCommandBuilder()
     .setName('juanplay')
-    .setDescription('Reproduce musica con el estilo unico de JUANPLAY.')
+    .setDescription('Reproduce musica por nombre o enlace de YouTube.')
     .addStringOption(option =>
       option
         .setName('busqueda')
@@ -52,6 +52,10 @@ export const slashCommands = [
   new SlashCommandBuilder()
     .setName('leave')
     .setDescription('Saca a JUANPLAY del canal de voz.'),
+
+  new SlashCommandBuilder()
+    .setName('testvoz')
+    .setDescription('Prueba si JUANPLAY puede conectarse a tu canal de voz.'),
 
   new SlashCommandBuilder()
     .setName('ping')

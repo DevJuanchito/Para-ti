@@ -1,7 +1,7 @@
 {
   "name": "juanplay-bot",
-  "version": "2.0.0",
-  "description": "JUANPLAY - Bot de musica para Discord con comandos slash listo para Railway",
+  "version": "3.0.0",
+  "description": "JUANPLAY - Bot de musica para Discord con slash commands, busqueda por nombre y enlaces de YouTube listo para Railway",
   "type": "module",
   "main": "index.js",
   "scripts": {
@@ -12,10 +12,13 @@
     "node": ">=20"
   },
   "dependencies": {
-    "@discordjs/voice": "^0.18.0",
-    "discord.js": "^14.16.3",
-    "ffmpeg-static": "^5.2.0",
-    "libsodium-wrappers": "^0.7.15",
-    "play-dl": "^1.9.7"
+    "@discordjs/voice": "0.18.0",
+    "@distube/ytdl-core": "latest",
+    "discord.js": "14.16.3",
+    "ffmpeg-static": "5.2.0",
+    "libsodium-wrappers": "0.7.15",
+    "opusscript": "0.1.1",
+    "yt-search": "2.13.1",
+    "ytpl": "2.3.0"
   }
 }

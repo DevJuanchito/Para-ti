@@ -1,16 +1,15 @@
-# JUANPLAY Bot listo para Railway
+# JUANPLAY Bot v3 listo para Railway
 
-Bot de musica para Discord con comandos slash. El nombre unico principal es:
+Esta version corrige el error donde el bot mostraba **Ocurrio un error interno** al usar `/play` o `/juanplay`.
+Ahora usa busqueda por nombre con `yt-search`, enlaces de YouTube con `@distube/ytdl-core`, y trae mensajes de error mas claros si Railway o Discord no dejan entrar al canal de voz.
 
-```txt
-/juanplay
-```
-
-Tambien incluye:
+## Comandos
 
 ```txt
 /help
-/play
+/juanplay busqueda
+/play busqueda
+/testvoz
 /skip
 /stop
 /pause
@@ -21,24 +20,34 @@ Tambien incluye:
 /ping
 ```
 
-## 1. Subir a Railway
+Ejemplos:
 
-1. Sube este proyecto a GitHub o a Railway.
-2. En Railway, abre tu servicio.
-3. Ve a **Variables**.
-4. Agrega esta variable:
+```txt
+/juanplay never gonna give you up
+/play https://www.youtube.com/watch?v=dQw4w9WgXcQ
+/testvoz
+```
+
+## 1. Variables obligatorias en Railway
+
+En Railway > tu servicio > Variables agrega:
 
 ```env
 DISCORD_TOKEN=TU_TOKEN_DEL_BOT
 ```
 
-5. Deploy / redeploy.
+Recomendado para que los comandos aparezcan rapido:
 
-El bot registra los comandos slash automaticamente al iniciar.
+```env
+GUILD_ID=ID_DE_TU_SERVIDOR
+```
+
+Para copiar el ID del servidor:
+Discord > Ajustes de usuario > Avanzado > activar **Modo desarrollador** > clic derecho al servidor > **Copiar ID**.
 
 ## 2. Invitar el bot correctamente
 
-En Discord Developer Portal > tu app > OAuth2 > URL Generator marca:
+En Discord Developer Portal > OAuth2 > URL Generator marca:
 
 ```txt
 bot
@@ -58,57 +67,44 @@ Hablar
 Usar sonidos externos
 ```
 
-Copia la URL generada, abre el enlace e invita el bot otra vez.
+Luego copia la URL generada e invita el bot otra vez.
 
-## 3. Si los comandos no aparecen
+## 3. Si `/play` falla con voz
 
-En Railway agrega tambien esta variable opcional:
+Primero prueba:
+
+```txt
+/testvoz
+```
+
+Si dice que no pudo conectarse:
+
+1. Entra tu primero a un canal de voz normal.
+2. Revisa que el bot tenga **Ver canales**, **Conectarse** y **Hablar** en ese canal.
+3. En Discord, cambia la region del canal de voz a **Automatico**.
+4. Si Railway sigue mostrando `AbortError` en `@discordjs/voice`, el problema es conexion de voz/UDP del hosting. El bot esta bien, pero ese host no esta logrando abrir la conexion de voz de Discord.
+
+## 4. Si YouTube bloquea canciones
+
+Puedes agregar opcionalmente en Railway:
 
 ```env
-GUILD_ID=ID_DE_TU_SERVIDOR
+YOUTUBE_COOKIE=TU_COOKIE_DE_YOUTUBE
 ```
 
-Luego redeploy. Los comandos se registran directo en ese servidor y aparecen mucho mas rapido.
-
-Para copiar el ID del servidor: Discord > Ajustes de usuario > Avanzado > activa **Modo desarrollador**. Despues clic derecho al servidor > **Copiar ID**.
-
-## 4. Comando principal
-
-Entra a un canal de voz y escribe en un canal de texto:
-
-```txt
-/juanplay nombre de la cancion
-```
-
-Ejemplos:
-
-```txt
-/juanplay never gonna give you up
-/play https://www.youtube.com/watch?v=dQw4w9WgXcQ
-/queue
-/skip
-/stop
-```
+No es obligatorio. Usalo solo si los logs dicen que YouTube bloqueo o pidio verificacion.
 
 ## 5. Comandos con ! opcionales
 
-Por seguridad vienen apagados porque requieren activar **Message Content Intent** en Developer Portal.
-
-Si quieres comandos tipo `!play`, activa en Railway:
+Si quieres `!play`, `!help`, etc., agrega en Railway:
 
 ```env
 ENABLE_PREFIX_COMMANDS=true
 PREFIX=!
 ```
 
-Y en Discord Developer Portal > Bot activa:
+Y en Developer Portal > Bot activa:
 
 ```txt
 Intent de contenido de mensajes
 ```
-
-## 6. Notas
-
-- No pegues tu token en chats ni en GitHub.
-- No subas `config.json` si tiene token real.
-- Si Railway dice `Falta configurar DISCORD_TOKEN`, la variable esta mal escrita o vacia.

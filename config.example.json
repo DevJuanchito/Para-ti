@@ -1,9 +1,10 @@
 {
-  "DISCORD_TOKEN": "PEGA_AQUI_EL_TOKEN_DE_TU_BOT",
-  "GUILD_ID": "",
-  "CLIENT_ID": "",
-  "ENABLE_PREFIX_COMMANDS": false,
+  "DISCORD_TOKEN": "pega_aqui_el_token_del_bot",
+  "GUILD_ID": "id_de_tu_servidor_opcional",
+  "CLIENT_ID": "id_de_tu_app_opcional",
+  "ENABLE_PREFIX_COMMANDS": "false",
   "PREFIX": "!",
-  "MAX_PLAYLIST_SONGS": 25,
-  "STAY_SECONDS": 60
+  "MAX_PLAYLIST_SONGS": "20",
+  "STAY_SECONDS": "90",
+  "VOICE_TIMEOUT_MS": "60000"
 }
