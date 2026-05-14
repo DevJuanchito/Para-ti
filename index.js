@@ -10,7 +10,8 @@ import {
   PermissionFlagsBits,
   REST,
   Routes,
-  SlashCommandBuilder
+  SlashCommandBuilder,
+  MessageFlags
 } from 'discord.js';
 import {
   AudioPlayerStatus,
@@ -38,7 +39,7 @@ const CONFIG = {
   emoji: process.env.DEFAULT_EMOJI || '🐵',
   developer: process.env.DEVELOPER_NAME || 'DEVJUANCHO',
   brand: process.env.BOT_BRAND || 'JUANPLAY',
-  version: '11.0.0',
+  version: '12.0.0',
   defaultVolume: clamp(Number(process.env.DEFAULT_VOLUME || 85), 1, 150),
   voiceTimeoutMs: Number(process.env.VOICE_TIMEOUT_MS || 120000),
   selfDeaf: String(process.env.VOICE_SELF_DEAF || 'true').toLowerCase() !== 'false',
@@ -154,9 +155,11 @@ function getState(guildId) {
 
     player.on(AudioPlayerStatus.Playing, () => {
       state.playingStartedAt = Date.now();
+      console.log(`[JUANPLAY audio] Reproduciendo en servidor ${state.guildId}: ${state.current?.title || 'audio de prueba'}`);
     });
 
     player.on(AudioPlayerStatus.Idle, () => {
+      console.log(`[JUANPLAY audio] Player quedó idle en servidor ${state.guildId}.`);
       if (state.cleanup) {
         state.cleanup();
         state.cleanup = null;
@@ -442,7 +445,8 @@ async function connectToVoice(interaction) {
       channelId: voiceChannel.id,
       guildId: interaction.guildId,
       adapterCreator: interaction.guild.voiceAdapterCreator,
-      selfDeaf: CONFIG.selfDeaf
+      selfDeaf: CONFIG.selfDeaf,
+      selfMute: false
     });
 
     state.connection.on(VoiceConnectionStatus.Disconnected, async () => {
@@ -644,7 +648,7 @@ async function updatePanel(state, mode = 'playing', detail = '') {
     embed = baseEmbed('JUANPLAY tuvo un problema de audio',
       `Voy a intentar seguir con la siguiente canción.\n\n` +
       `**Detalle corto:** ${cut(detail || 'Error desconocido', 250)}\n` +
-      `**Tip:** Usa /diagnostico. Este v11 usa el audio estable de v7 + panel público de v10.`
+      `**Tip:** Usa /diagnostico. Este v12 usa el audio estable de v7 + panel público sin spam.`
     );
   } else {
     embed = baseEmbed('JUANPLAY', 'Panel actualizado.');
@@ -680,7 +684,7 @@ function queueEmbed(state, user) {
 }
 
 async function sendPrivate(interaction, payload) {
-  const data = { ...payload, ephemeral: true };
+  const data = privatePayload(payload);
   if (interaction.deferred || interaction.replied) return interaction.editReply(payload).catch(() => interaction.followUp(data));
   return interaction.reply(data);
 }
@@ -697,9 +701,9 @@ function isCooldown(interaction) {
 async function handlePlay(interaction, input) {
   const wait = isCooldown(interaction);
   if (wait) {
-    return interaction.reply({ content: `⏳ Espera ${wait}s antes de usar otra vez el comando.`, ephemeral: true });
+    return interaction.reply({ content: `⏳ Espera ${wait}s antes de usar otra vez el comando.`, flags: MessageFlags.Ephemeral });
   }
-  await interaction.deferReply({ ephemeral: CONFIG.privateResponses });
+  await interaction.deferReply(CONFIG.privateResponses ? { flags: MessageFlags.Ephemeral } : {});
 
   let state;
   try {
@@ -760,7 +764,7 @@ function resultsButtons(key, results) {
 }
 
 async function handleSearch(interaction, query, title = 'Resultados privados') {
-  await interaction.deferReply({ ephemeral: true });
+  await interaction.deferReply({ flags: MessageFlags.Ephemeral });
   const results = await searchVideos(query, 5);
   if (!results.length) {
     return interaction.editReply({ embeds: [baseEmbed('Sin resultados', 'No encontré canciones con ese texto.')] });
@@ -780,7 +784,7 @@ async function recommendationResults(state, query = '') {
 }
 
 async function handleRecommendations(interaction, query = '') {
-  await interaction.deferReply({ ephemeral: true });
+  await interaction.deferReply({ flags: MessageFlags.Ephemeral });
   const state = getState(interaction.guildId);
   const results = await recommendationResults(state, query);
   if (!results.length) return interaction.editReply({ embeds: [baseEmbed('Sin recomendados', 'No encontré recomendados ahora mismo.')] });
@@ -791,13 +795,13 @@ async function handleRecommendations(interaction, query = '') {
 
 async function handleAddButton(interaction, key, index) {
   const entry = searchCache.get(key);
-  if (!entry) return interaction.reply({ content: '⏳ Esa búsqueda ya expiró. Usa /buscar otra vez.', ephemeral: true });
+  if (!entry) return interaction.reply({ content: '⏳ Esa búsqueda ya expiró. Usa /buscar otra vez.', flags: MessageFlags.Ephemeral });
   if (entry.requesterId !== interaction.user.id) {
-    return interaction.reply({ content: '🔒 Estos botones son privados de otra persona. Usa /buscar o /recomendados para crear los tuyos.', ephemeral: true });
+    return interaction.reply({ content: '🔒 Estos botones son privados de otra persona. Usa /buscar o /recomendados para crear los tuyos.', flags: MessageFlags.Ephemeral });
   }
   const result = entry.results[Number(index)];
-  if (!result) return interaction.reply({ content: 'No encontré ese resultado.', ephemeral: true });
-  await interaction.deferReply({ ephemeral: true });
+  if (!result) return interaction.reply({ content: 'No encontré ese resultado.', flags: MessageFlags.Ephemeral });
+  await interaction.deferReply({ flags: MessageFlags.Ephemeral });
   let state;
   try {
     state = await connectToVoice(interaction);
@@ -824,22 +828,22 @@ async function handleButton(interaction) {
 
   const state = getState(interaction.guildId);
   if (['pause', 'resume', 'skip', 'stop'].includes(action) && !sameVoice(interaction, state)) {
-    return interaction.reply({ content: 'Entra al mismo canal de voz del bot para usar esos controles.', ephemeral: true });
+    return interaction.reply({ content: 'Entra al mismo canal de voz del bot para usar esos controles.', flags: MessageFlags.Ephemeral });
   }
 
   if (action === 'pause') {
     state.player.pause();
     await updatePanel(state, 'playing');
-    return interaction.reply({ content: '⏸️ Pausado.', ephemeral: true });
+    return interaction.reply({ content: '⏸️ Pausado.', flags: MessageFlags.Ephemeral });
   }
   if (action === 'resume') {
     state.player.unpause();
     await updatePanel(state, 'playing');
-    return interaction.reply({ content: '▶️ Siguiendo.', ephemeral: true });
+    return interaction.reply({ content: '▶️ Siguiendo.', flags: MessageFlags.Ephemeral });
   }
   if (action === 'skip') {
     state.player.stop(true);
-    return interaction.reply({ content: '⏭️ Saltando canción.', ephemeral: true });
+    return interaction.reply({ content: '⏭️ Saltando canción.', flags: MessageFlags.Ephemeral });
   }
   if (action === 'stop') {
     state.queue = [];
@@ -851,10 +855,10 @@ async function handleButton(interaction) {
     state.current = null;
     setIdlePresence();
     await updatePanel(state, 'ended');
-    return interaction.reply({ content: '🛑 Música detenida y cola limpiada.', ephemeral: true });
+    return interaction.reply({ content: '🛑 Música detenida y cola limpiada.', flags: MessageFlags.Ephemeral });
   }
   if (action === 'queue') {
-    return interaction.reply({ embeds: [queueEmbed(state, interaction.user)], ephemeral: true });
+    return interaction.reply({ embeds: [queueEmbed(state, interaction.user)], flags: MessageFlags.Ephemeral });
   }
   if (action === 'similar') {
     return handleRecommendations(interaction, '');
@@ -895,6 +899,57 @@ async function diagnosticsEmbed(interaction) {
   return baseEmbed('Diagnóstico JUANPLAY', lines.join('\n'));
 }
 
+
+function privatePayload(payload = {}) {
+  return { ...payload, flags: MessageFlags.Ephemeral };
+}
+
+async function privateReply(interaction, payload = {}) {
+  return interaction.reply(privatePayload(payload));
+}
+
+async function privateDefer(interaction) {
+  return interaction.deferReply({ flags: MessageFlags.Ephemeral });
+}
+
+function createTestToneResource(state) {
+  const proc = spawn(CONFIG.ffmpegPath, [
+    '-hide_banner', '-loglevel', 'error',
+    '-f', 'lavfi', '-i', 'sine=frequency=880:duration=4',
+    '-filter:a', `volume=${Math.max(0.1, clamp(state.volume, 1, 150) / 100)}`,
+    '-f', 's16le', '-ar', '48000', '-ac', '2', 'pipe:1'
+  ], { stdio: ['ignore', 'pipe', 'pipe'] });
+  pendingProcesses.add(proc);
+  proc.on('close', () => pendingProcesses.delete(proc));
+  proc.on('error', (err) => {
+    pendingProcesses.delete(proc);
+    state.lastError = err?.message || String(err);
+  });
+  return createAudioResource(proc.stdout, {
+    inputType: StreamType.Raw,
+    inlineVolume: true,
+    metadata: { title: 'Prueba de audio JUANPLAY', requestedById: 'system' }
+  });
+}
+
+async function handleTestAudio(interaction) {
+  await privateDefer(interaction);
+  try {
+    const state = await connectToVoice(interaction);
+    if (state.cleanup) {
+      try { state.cleanup(); } catch {}
+      state.cleanup = null;
+    }
+    const resource = createTestToneResource(state);
+    resource.volume?.setVolume(clamp(state.volume, 1, 150) / 100);
+    state.current = null;
+    state.player.play(resource);
+    await interaction.editReply({ embeds: [baseEmbed('Prueba de audio enviada', 'Estoy reproduciendo un tono corto de 4 segundos.\n\nSi no escuchas nada, revisa en Discord que el bot no esté silenciado, que tenga volumen arriba y que el canal permita **Hablar**.\nSi sí se escucha, el problema está en el stream de la canción y no en Discord Voice.')] });
+  } catch (err) {
+    return interaction.editReply({ embeds: [baseEmbed('Falló la prueba de audio', cut(err.message || String(err), 500))] });
+  }
+}
+
 const commands = [
   new SlashCommandBuilder()
     .setName('play')
@@ -925,6 +980,7 @@ const commands = [
     .setDescription('Cambia el volumen del bot.')
     .addIntegerOption((o) => o.setName('nivel').setDescription('Volumen de 1 a 150.').setRequired(true).setMinValue(1).setMaxValue(150)),
   new SlashCommandBuilder().setName('testvoz').setDescription('Prueba que el bot pueda entrar al canal de voz.'),
+  new SlashCommandBuilder().setName('testaudio').setDescription('Reproduce un tono corto para confirmar que el bot sí se escucha.'),
   new SlashCommandBuilder().setName('diagnostico').setDescription('Revisa FFmpeg, yt-dlp, Opus, conexión y estado.'),
   new SlashCommandBuilder().setName('perfil').setDescription('Texto recomendado para el perfil/descripción del bot.'),
   new SlashCommandBuilder().setName('creditos').setDescription('Créditos oficiales de JUANPLAY.'),
@@ -981,28 +1037,28 @@ client.on(Events.InteractionCreate, async (interaction) => {
     }
     if (commandName === 'queue') {
       const state = getState(interaction.guildId);
-      return interaction.reply({ embeds: [queueEmbed(state, interaction.user)], ephemeral: true });
+      return interaction.reply({ embeds: [queueEmbed(state, interaction.user)], flags: MessageFlags.Ephemeral });
     }
     if (commandName === 'nowplaying') {
       const state = getState(interaction.guildId);
-      return interaction.reply({ embeds: [nowPlayingEmbed(state)], ephemeral: true });
+      return interaction.reply({ embeds: [nowPlayingEmbed(state)], flags: MessageFlags.Ephemeral });
     }
     if (commandName === 'pause') {
       const state = getState(interaction.guildId);
       state.player.pause();
       await updatePanel(state, 'playing');
-      return interaction.reply({ content: '⏸️ Pausado.', ephemeral: true });
+      return interaction.reply({ content: '⏸️ Pausado.', flags: MessageFlags.Ephemeral });
     }
     if (commandName === 'resume') {
       const state = getState(interaction.guildId);
       state.player.unpause();
       await updatePanel(state, 'playing');
-      return interaction.reply({ content: '▶️ Siguiendo.', ephemeral: true });
+      return interaction.reply({ content: '▶️ Siguiendo.', flags: MessageFlags.Ephemeral });
     }
     if (commandName === 'skip') {
       const state = getState(interaction.guildId);
       state.player.stop(true);
-      return interaction.reply({ content: '⏭️ Saltando.', ephemeral: true });
+      return interaction.reply({ content: '⏭️ Saltando.', flags: MessageFlags.Ephemeral });
     }
     if (commandName === 'stop') {
       const state = getState(interaction.guildId);
@@ -1015,7 +1071,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
       state.current = null;
       setIdlePresence();
       await updatePanel(state, 'ended');
-      return interaction.reply({ content: '🛑 Música detenida y cola limpiada.', ephemeral: true });
+      return interaction.reply({ content: '🛑 Música detenida y cola limpiada.', flags: MessageFlags.Ephemeral });
     }
     if (commandName === 'leave') {
       const state = getState(interaction.guildId);
@@ -1027,7 +1083,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
       }
       state.current = null;
       setIdlePresence();
-      return interaction.reply({ content: '👋 Salí del canal de voz.', ephemeral: true });
+      return interaction.reply({ content: '👋 Salí del canal de voz.', flags: MessageFlags.Ephemeral });
     }
     if (commandName === 'volume') {
       const state = getState(interaction.guildId);
@@ -1036,10 +1092,10 @@ client.on(Events.InteractionCreate, async (interaction) => {
       const resource = state.player.state.resource;
       resource?.volume?.setVolume(state.volume / 100);
       await updatePanel(state, 'playing');
-      return interaction.reply({ content: `🔊 Volumen cambiado a ${state.volume}%.`, ephemeral: true });
+      return interaction.reply({ content: `🔊 Volumen cambiado a ${state.volume}%.`, flags: MessageFlags.Ephemeral });
     }
     if (commandName === 'testvoz') {
-      await interaction.deferReply({ ephemeral: true });
+      await interaction.deferReply({ flags: MessageFlags.Ephemeral });
       try {
         const state = await connectToVoice(interaction);
         return interaction.editReply({ embeds: [baseEmbed('Prueba de voz correcta', `Entré al canal de voz y quedé en estado: **${state.connection.state.status}**.\nAhora prueba /play.`)] });
@@ -1047,8 +1103,11 @@ client.on(Events.InteractionCreate, async (interaction) => {
         return interaction.editReply({ embeds: [baseEmbed('Falló la prueba de voz', cut(err.message || String(err), 500))] });
       }
     }
+    if (commandName === 'testaudio') {
+      return handleTestAudio(interaction);
+    }
     if (commandName === 'diagnostico') {
-      await interaction.deferReply({ ephemeral: true });
+      await interaction.deferReply({ flags: MessageFlags.Ephemeral });
       return interaction.editReply({ embeds: [await diagnosticsEmbed(interaction)] });
     }
     if (commandName === 'perfil') {
@@ -1057,10 +1116,10 @@ client.on(Events.InteractionCreate, async (interaction) => {
         `🎵 ${CONFIG.brand} — música con comandos slash, búsqueda, cola, recomendados privados y panel limpio para servidores públicos.\n` +
         `Desarrollador único: ${CONFIG.developer}.\n\n` +
         `La descripción real del perfil se cambia en Discord Developer Portal → General Information / Bot. La actividad sí la cambia el código automáticamente con la canción actual.`;
-      return interaction.reply({ embeds: [baseEmbed('Perfil oficial de JUANPLAY', desc)], ephemeral: true });
+      return interaction.reply({ embeds: [baseEmbed('Perfil oficial de JUANPLAY', desc)], flags: MessageFlags.Ephemeral });
     }
     if (commandName === 'creditos') {
-      return interaction.reply({ embeds: [baseEmbed('Créditos oficiales', `**${CONFIG.brand}**\nDesarrollador único: **${CONFIG.developer}**\nSistema público de música: audio corregido, recomendaciones privadas, panel limpio y actividad dinámica.`)], ephemeral: true });
+      return interaction.reply({ embeds: [baseEmbed('Créditos oficiales', `**${CONFIG.brand}**\nDesarrollador único: **${CONFIG.developer}**\nSistema público de música: audio corregido, recomendaciones privadas, panel limpio y actividad dinámica.`)], flags: MessageFlags.Ephemeral });
     }
     if (commandName === 'help') {
       const desc = `**Música**\n` +
@@ -1070,16 +1129,16 @@ client.on(Events.InteractionCreate, async (interaction) => {
         `**Control**\n` +
         '`/pause`, `/resume`, `/skip`, `/stop`, `/leave`, `/volume`\n\n' +
         `**Info**\n` +
-        '`/queue`, `/nowplaying`, `/diagnostico`, `/perfil`, `/creditos`\n\n' +
+        '`/queue`, `/nowplaying`, `/testvoz`, `/testaudio`, `/diagnostico`, `/perfil`, `/creditos`\n\n' +
         `Panel público sin spam + respuestas privadas. Desarrollador: **${CONFIG.developer}**.`;
-      return interaction.reply({ embeds: [baseEmbed('Ayuda de JUANPLAY', desc)], ephemeral: true });
+      return interaction.reply({ embeds: [baseEmbed('Ayuda de JUANPLAY', desc)], flags: MessageFlags.Ephemeral });
     }
     if (commandName === 'ping') {
-      return interaction.reply({ content: `🏓 Pong • ${client.ws.ping}ms • ${CONFIG.brand} by ${CONFIG.developer}`, ephemeral: true });
+      return interaction.reply({ content: `🏓 Pong • ${client.ws.ping}ms • ${CONFIG.brand} by ${CONFIG.developer}`, flags: MessageFlags.Ephemeral });
     }
   } catch (err) {
     console.error('[JUANPLAY] Error ejecutando interacción:', err);
-    const payload = { embeds: [baseEmbed('Error inesperado', cut(err.message || String(err), 500))], ephemeral: true };
+    const payload = { embeds: [baseEmbed('Error inesperado', cut(err.message || String(err), 500))], flags: MessageFlags.Ephemeral };
     if (interaction.isRepliable()) {
       if (interaction.deferred || interaction.replied) await interaction.followUp(payload).catch(() => {});
       else await interaction.reply(payload).catch(() => {});

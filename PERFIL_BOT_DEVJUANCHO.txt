@@ -12,3 +12,6 @@ Busca canciones por nombre o link, reproduce música, muestra panel limpio, cola
 
 ESTADO / ACTIVIDAD:
 El bot cambia automáticamente su actividad cuando reproduce música y muestra la canción actual.
+
+COMANDO DE PRUEBA DE AUDIO:
+/testaudio reproduce un tono corto para confirmar que el bot sí se escucha en voz.

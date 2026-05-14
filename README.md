@@ -1,10 +1,12 @@
-# 🎧 JUANPLAY DEVJUANCHO PÚBLICO v11
+# 🎧 JUANPLAY DEVJUANCHO PÚBLICO v12
 
 Bot de música listo para servidor público. Desarrollador único: **DEVJUANCHO**.
 
-## ✅ Arreglos de v11
+## ✅ Arreglos de v12
 
-- Audio cambiado al sistema estable de v7 para que vuelva a sonar.
+- Audio mantenido con el sistema estable de v7 para que vuelva a sonar.
+- Agregado `/testaudio` para comprobar con un tono real si Discord está escuchando audio.
+- Agregado `libsodium-wrappers` y `prism-media` para mejorar compatibilidad de voz en Railway.
 - Mantiene el diseño público decorado de v10.
 - Panel público único: se edita en vez de spamear el canal.
 - Recomendaciones privadas: solo las ve la persona que las pidió.
@@ -62,6 +64,7 @@ si aparece error **429 / Too Many Requests**.
 ```txt
 /diagnostico
 /testvoz
+/testaudio
 /play paulo londra no puedo
 /nowplaying
 /recomendados
