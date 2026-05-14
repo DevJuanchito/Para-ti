@@ -1,7 +1,7 @@
 {
-  "name": "juanplay-devjuancho-publico-v8",
-  "version": "8.2.0",
-  "description": "JUANPLAY Music Bot público v8.2 por DEVJUANCHO / JuanStudio. Sin cookie obligatoria, actividad dinámica, cola completa, botones, anti-spam y diseño premium.",
+  "name": "juanplay-devjuancho-publico-v9-base-tu-codigo",
+  "version": "9.0.0",
+  "description": "JUANPLAY v9 público por DEVJUANCHO / JuanStudio. Basado en el código funcional v7, sin cookies obligatorias, con panel, cola completa, anti-spam, actividad dinámica y embeds decorados.",
   "main": "index.js",
   "type": "commonjs",
   "scripts": {
@@ -16,9 +16,9 @@
     "discord.js": "latest",
     "ffmpeg-static": "latest",
     "libsodium-wrappers": "latest",
-    "opusscript": "latest",
     "prism-media": "latest",
     "youtube-dl-exec": "latest",
-    "yt-search": "latest"
+    "yt-search": "latest",
+    "opusscript": "latest"
   }
 }

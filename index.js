@@ -1,13 +1,11 @@
 /*
-  🎧 JUANPLAY DEVJUANCHO PÚBLICO v8.2 SIN COOKIE
+  🎧 JUANPLAY DEVJUANCHO PÚBLICO v9
   Creado para DEVJUANCHO / JuanStudio
-  Discord Music Bot con comandos slash, yt-dlp, recomendaciones, paneles decorados,
-  cola completa paginada, anti-spam, botones de control y actividad dinámica.
+  Basado en el código funcional v7 de DEVJUANCHO / JuanStudio.
+  Motor de reproducción conservado: yt-dlp directo, sin cookies obligatorias.
 */
 
 const http = require('node:http');
-const fs = require('node:fs');
-const os = require('node:os');
 const path = require('node:path');
 
 const {
@@ -58,14 +56,12 @@ const SUCCESS_COLOR = process.env.SUCCESS_COLOR || '#2ecc71';
 const WARNING_COLOR = process.env.WARNING_COLOR || '#f1c40f';
 const ERROR_COLOR = process.env.ERROR_COLOR || '#ff2f7d';
 const BOT_NAME = process.env.BOT_NAME || 'JUANPLAY';
-const BOT_VERSION = '8.2.0';
+const BOT_VERSION = '9.0.0';
 const BRAND = process.env.BOT_BRAND || 'DEVJUANCHO • JuanStudio';
 const BOT_INVITE_URL = process.env.BOT_INVITE_URL || '';
 const SUPPORT_SERVER = process.env.SUPPORT_SERVER || '';
 const WEBSITE_URL = process.env.WEBSITE_URL || '';
 const USER_AGENT = process.env.USER_AGENT || 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36';
-const YOUTUBE_PLAYER_CLIENTS = String(process.env.YOUTUBE_PLAYER_CLIENTS || 'default,android,ios,mweb,web').split(',').map((v) => v.trim()).filter(Boolean);
-const YOUTUBE_FORCE_IPV4 = String(process.env.YOUTUBE_FORCE_IPV4 || 'true').toLowerCase() !== 'false';
 const EPHEMERAL = MessageFlags.Ephemeral;
 
 if (!TOKEN) {
@@ -210,7 +206,7 @@ function platformsEmbed() {
     '✅ **Spotify / Apple Music / Deezer / Tidal**: toma el nombre del link y busca la canción en YouTube.',
     '✅ Muchas páginas soportadas por **yt-dlp**.',
     '',
-    '⚠️ Esta versión va **sin cookie**. Si YouTube rechaza un video en Railway, el bot intenta clientes alternativos automáticamente.',
+    '✅ Esta versión va **sin cookies obligatorias** y conserva el motor que ya te reproduce.',
   ].join('\n'));
 }
 
@@ -228,7 +224,7 @@ function setupEmbed() {
     '│ `COMMAND_COOLDOWN_MS=2500` evita spam de comandos.',
     '│ `MAX_QUEUE_SIZE=500` protege servidores públicos.',
     '│ `BOT_INVITE_URL` opcional para `/invite`.',
-    '╰─ `YOUTUBE_PLAYER_CLIENTS=default,android,ios,mweb,web` controla los reintentos sin cookie.',
+    '╰─ No necesitas cookies para usar esta versión.',
     '',
     '🎨 **Perfil del bot:** avatar, banner y descripción se cambian en Discord Developer Portal. Desde el código sí se actualiza la actividad dinámica.',
   ].join('\n'));
@@ -362,7 +358,8 @@ function youtubePlaylistUrl(url) {
 }
 
 function commonYtDlpFlags(extra = {}) {
-  const flags = {
+  // Motor igual al código que ya te funciona: yt-dlp directo, sin cookies obligatorias.
+  return {
     noWarnings: true,
     noCheckCertificates: true,
     preferFreeFormats: true,
@@ -377,7 +374,6 @@ function commonYtDlpFlags(extra = {}) {
     socketTimeout: 20,
     ...extra,
   };
-  return flags;
 }
 
 function getQueue(guildId) {
@@ -400,8 +396,6 @@ function getQueue(guildId) {
     volume: DEFAULT_VOLUME,
     locked: false,
     lastError: null,
-    lastPublicErrorAt: 0,
-    lastPublicErrorKey: '',
   };
 
   player.on(AudioPlayerStatus.Idle, () => {
@@ -538,11 +532,9 @@ async function playNext(guildId) {
   } catch (error) {
     q.lastError = error;
     console.error('[JUANPLAY] No pude iniciar canción:', error);
-    const removed = removeYouTubeTracksWhenBlocked(q, error);
-    if (q.textChannel && shouldSendPublicError(q, error)) {
-      const extra = removed ? `\n\n🧹 Para evitar spam, quité **${removed}** canciones de YouTube pendientes de la cola. Puedes agregar otra búsqueda o usar SoundCloud/link directo.` : '';
+    if (q.textChannel) {
       q.textChannel.send({
-        embeds: [errEmbed('No pude reproducir esa canción', `${buildPlaybackError(error)}${extra}`)],
+        embeds: [errEmbed('No pude reproducir esa canción', buildPlaybackError(error))],
       }).catch(() => {});
     }
     stopTrackProcess(next);
@@ -556,43 +548,10 @@ async function playNext(guildId) {
   q.locked = false;
 }
 
-function getErrorText(error) {
-  return [
-    error?.message,
-    error?.stderr,
-    error?.stdout,
-    error?.stack,
-    String(error || ''),
-  ].filter(Boolean).join('\n');
-}
-
-function isYouTubeAuthError(error) {
-  return /sign in to confirm|not a bot|cookies-from-browser|use --cookies|confirm you.re not a bot|authentication/i.test(getErrorText(error));
-}
-
-function isYouTubeRateLimitError(error) {
-  return /429|Too Many Requests/i.test(getErrorText(error));
-}
-
-function isYouTubeUrl(url) {
-  return /youtube\.com|youtu\.be/i.test(String(url || ''));
-}
-
 function buildPlaybackError(error) {
-  const message = getErrorText(error) || 'Error desconocido';
-  if (isYouTubeAuthError(error)) {
-    return [
-      'YouTube rechazó ese video en el hosting, pero esta versión **no usa cookie**.',
-      '',
-      '✅ El bot ya intentó modo normal y clientes alternativos sin cookie.',
-      '✅ Prueba otro nombre/link de YouTube, SoundCloud o un link directo `.mp3/.m4a/.wav`.',
-      '✅ Si tu código viejo reproduce ese tema, sube exactamente este build limpio y haz redeploy desde cero.',
-      '',
-      `Detalle: \`${cut(message, 450)}\``,
-    ].join('\n');
-  }
-  if (isYouTubeRateLimitError(error)) {
-    return 'YouTube limitó temporalmente la IP del hosting con **429**. Esta versión no usa cookie: intenta otro video, espera unos minutos, cambia de hosting/IP o usa SoundCloud/link directo.';
+  const message = String(error?.message || error || 'Error desconocido');
+  if (/429|Too Many Requests|Sign in to confirm|not a bot|cookies-from-browser|authentication/i.test(message)) {
+    return 'YouTube bloqueó la IP del hosting o pidió verificación anti-bot.\n\n✅ Esta versión no obliga cookies. Prueba buscar por **nombre de canción**, usar otro video, SoundCloud o un link directo `.mp3/.m4a/.wav`.\n\nSi tu código base v7 sí reproduce en el mismo hosting, este build mantiene ese mismo motor de reproducción.';
   }
   if (/signalling|aborted|VoiceConnection|timed out|Ready/i.test(message)) {
     return `No pude conectar a Discord Voice.\n\nRevisa permisos del canal: **Ver canales, Conectarse y Hablar**.\nSi estás en Railway y queda en \`signalling\`, el hosting puede estar bloqueando Discord Voice/UDP.\n\nDetalle: \`${cut(message, 500)}\``;
@@ -600,104 +559,14 @@ function buildPlaybackError(error) {
   return `Detalle: \`${cut(message, 900)}\``;
 }
 
-function shouldSendPublicError(q, error) {
-  const now = Date.now();
-  const key = isYouTubeAuthError(error) ? 'youtube-auth' : isYouTubeRateLimitError(error) ? 'youtube-429' : cut(getErrorText(error), 80);
-  if (q.lastPublicErrorKey === key && now - q.lastPublicErrorAt < 30_000) return false;
-  q.lastPublicErrorKey = key;
-  q.lastPublicErrorAt = now;
-  return true;
-}
-
-function removeYouTubeTracksWhenBlocked(q, error) {
-  if (!isYouTubeAuthError(error) && !isYouTubeRateLimitError(error)) return 0;
-  const before = q.tracks.length;
-  q.tracks = q.tracks.filter((track) => !isYouTubeUrl(track.url));
-  return before - q.tracks.length;
-}
-
-async function waitForYtDlpStart(proc, getStderr) {
-  if (!proc?.stdout) return;
-
-  await new Promise((resolve, reject) => {
-    let done = false;
-    const finish = (fn, value) => {
-      if (done) return;
-      done = true;
-      clearTimeout(timer);
-      proc.stdout?.off('readable', onReadable);
-      proc.off('close', onClose);
-      proc.off('error', onError);
-      fn(value);
-    };
-    const onReadable = () => finish(resolve);
-    const onClose = (code) => {
-      if (code && code !== 0) {
-        const error = new Error(`yt-dlp cerró con código ${code}: ${cut(getStderr(), 1800)}`);
-        error.stderr = getStderr();
-        return finish(reject, error);
-      }
-      return finish(resolve);
-    };
-    const onError = (error) => finish(reject, error);
-    const timer = setTimeout(() => finish(resolve), 3500);
-
-    proc.stdout.once('readable', onReadable);
-    proc.once('close', onClose);
-    proc.once('error', onError);
-  });
-}
-
-function buildAudioFlagsForClient(clientName) {
+async function createYtDlpAudioResource(track) {
   const flags = commonYtDlpFlags({
     output: '-',
     format: 'bestaudio[ext=webm][acodec=opus]/bestaudio[acodec=opus]/bestaudio/best',
     noPlaylist: true,
     quiet: true,
-    forceIpv4: YOUTUBE_FORCE_IPV4,
   });
 
-  if (clientName && clientName !== 'default') {
-    flags.extractorArgs = `youtube:player_client=${clientName}`;
-  }
-
-  return flags;
-}
-
-function buildAudioVariants(track) {
-  const clients = isYouTubeUrl(track.url) ? YOUTUBE_PLAYER_CLIENTS : ['default'];
-  const unique = [];
-  for (const clientName of clients) {
-    if (!unique.includes(clientName)) unique.push(clientName);
-  }
-  if (!unique.includes('default')) unique.unshift('default');
-  return unique.map((clientName) => ({ clientName, flags: buildAudioFlagsForClient(clientName) }));
-}
-
-async function createYtDlpAudioResource(track) {
-  const variants = buildAudioVariants(track);
-  const errors = [];
-
-  for (const variant of variants) {
-    try {
-      const resource = await createYtDlpAudioResourceWithFlags(track, variant.flags, variant.clientName);
-      if (variant.clientName !== 'default') track.source = `${track.source || 'YouTube'} • ${variant.clientName}`;
-      return resource;
-    } catch (error) {
-      errors.push(`[${variant.clientName}] ${cut(getErrorText(error), 700)}`);
-      stopTrackProcess(track);
-      track.process = null;
-      if (!isYouTubeUrl(track.url)) break;
-      console.warn(`[JUANPLAY] Modo YouTube ${variant.clientName} falló, pruebo otro...`);
-    }
-  }
-
-  const finalError = new Error(`No pude abrir el stream sin cookie después de ${variants.length} intento(s).\n${errors.join('\n')}`);
-  finalError.stderr = errors.join('\n');
-  throw finalError;
-}
-
-async function createYtDlpAudioResourceWithFlags(track, flags, clientName = 'default') {
   const proc = ytdlp.exec(track.url, flags, {
     windowsHide: true,
     maxBuffer: 1024 * 1024 * 50,
@@ -705,31 +574,28 @@ async function createYtDlpAudioResourceWithFlags(track, flags, clientName = 'def
 
   track.process = proc;
 
-  let stderr = '';
-  const getStderr = () => stderr;
-
-  // youtube-dl-exec devuelve un ChildProcess con promesa interna. Esto evita el Unhandled rejection
-  // cuando YouTube bloquea el stream antes de que Discord empiece a reproducirlo.
+  // youtube-dl-exec puede comportarse como proceso y promesa a la vez.
+  // Esto evita logs de Unhandled rejection sin cambiar el stream que ya funciona.
   if (typeof proc.catch === 'function') {
     proc.catch((error) => {
-      if (!stderr && error?.stderr) stderr = String(error.stderr);
+      const msg = error?.stderr || error?.message || String(error || '');
+      if (msg) console.warn(`[JUANPLAY] yt-dlp finalizó con error controlado: ${cut(msg, 700)}`);
     });
   }
 
+  let stderr = '';
   proc.stderr?.on('data', (chunk) => {
     stderr += chunk.toString();
     if (stderr.length > 4000) stderr = stderr.slice(-4000);
   });
 
   proc.on('close', (code) => {
-    if (code && code !== 0) console.warn(`[JUANPLAY] yt-dlp (${clientName}) cerró con código ${code}: ${cut(stderr, 700)}`);
+    if (code && code !== 0) console.warn(`[JUANPLAY] yt-dlp cerró con código ${code}: ${cut(stderr, 700)}`);
   });
 
   proc.on('error', (error) => {
-    console.warn(`[JUANPLAY] Error lanzando yt-dlp (${clientName}):`, error.message);
+    console.warn('[JUANPLAY] Error lanzando yt-dlp:', error.message);
   });
-
-  await waitForYtDlpStart(proc, getStderr);
 
   return createAudioResource(proc.stdout, {
     inputType: StreamType.Arbitrary,
@@ -1463,8 +1329,6 @@ async function handleDiagnostico(interaction) {
     `🧩 Node: **${process.version}**`,
     `🎚️ FFmpeg: **${ffmpegPath ? 'incluido' : 'no detectado'}**`,
     `🎙️ Opus: **${hasModule('opusscript') || hasModule('@discordjs/opus') ? 'instalado' : 'no instalado'}**`,
-    `🧪 YouTube sin cookie: **activo**`,
-    `🎚️ Clientes YouTube: **${YOUTUBE_PLAYER_CLIENTS.join(', ')}**`,
     `🏠 GUILD_ID: **${GUILD_ID ? GUILD_ID : 'no configurado, comandos globales'}**`,
     `🔊 Volumen: **${Math.round(q.volume * 100)}%**`,
     `📡 Voice timeout: **${VOICE_TIMEOUT_MS}ms**`,
