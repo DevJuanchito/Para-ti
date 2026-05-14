@@ -1,27 +1,23 @@
 {
-  "name": "juanplay-devjuancho-v5",
-  "version": "5.0.0",
-  "description": "JUANPLAY DEVJUANCHO v5 - Bot de musica Discord decorado con slash commands, voz mejorada, YouTube/SoundCloud/Spotify/Apple/Deezer por busqueda y enlaces directos.",
-  "type": "module",
+  "name": "juanplay-devjuancho-definitivo",
+  "version": "6.0.0",
+  "description": "JUANPLAY Music Bot definitivo por DEVJUANCHO / JuanStudio. YouTube, SoundCloud, links directos, búsqueda por nombre, recomendaciones y comandos slash.",
   "main": "index.js",
+  "type": "commonjs",
   "scripts": {
     "start": "node index.js",
-    "check": "node --check index.js",
-    "register": "node index.js"
+    "check": "node --check index.js"
   },
   "engines": {
-    "node": ">=20"
+    "node": ">=20.0.0"
   },
   "dependencies": {
-    "@discordjs/voice": "0.18.0",
-    "@distube/ytdl-core": "latest",
-    "discord.js": "14.16.3",
-    "ffmpeg-static": "5.2.0",
-    "libsodium-wrappers": "0.7.15",
-    "opusscript": "0.1.1",
-    "play-dl": "1.9.7",
-    "yt-search": "2.13.1",
-    "ytpl": "2.3.0",
-    "@discordjs/opus": "0.10.0"
+    "@discordjs/voice": "latest",
+    "discord.js": "latest",
+    "ffmpeg-static": "latest",
+    "libsodium-wrappers": "latest",
+    "prism-media": "latest",
+    "youtube-dl-exec": "latest",
+    "yt-search": "latest"
   }
 }

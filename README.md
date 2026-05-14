@@ -1,60 +1,41 @@
-# JUANPLAY DEVJUANCHO v5
+# 🎧 JUANPLAY DEVJUANCHO DEFINITIVO v6
 
-Bot de música personalizado para Discord, decorado al estilo **JUANPLAY / DEVJUANCHO / JuanStudio**.
+Bot de música personalizado para **DEVJUANCHO / JuanStudio**.
 
-## Comandos
+## ✅ Qué trae
 
-- `/juanplay busqueda`
-- `/play busqueda`
-- `/buscar busqueda`
-- `/plataformas`
-- `/permisos`
-- `/testvoz`
-- `/diagnostico`
-- `/setup`
-- `/skip`
-- `/stop`
-- `/pause`
-- `/resume`
-- `/queue`
-- `/nowplaying`
-- `/volume nivel`
-- `/leave`
-- `/creditos`
-- `/ping`
+- `/play` y `/juanplay` por **nombre** o **link**.
+- Autocomplete/recomendados al escribir canciones.
+- `/buscar` con resultados y botones para elegir.
+- Soporta YouTube, SoundCloud, links directos y muchas plataformas soportadas por `yt-dlp`.
+- Spotify / Apple Music / Deezer: toma el nombre del link y lo busca en YouTube.
+- Mensajes decorados, créditos DEVJUANCHO, cola, volumen, pause/resume/skip/stop.
+- Dockerfile incluido para Railway con Python + FFmpeg + yt-dlp.
 
-## Plataformas
+## 🚀 Variables en Railway
 
-- YouTube links, nombres y playlists.
-- SoundCloud links.
-- Spotify / Apple Music / Deezer links por metadata: JUANPLAY busca la canción reproducible.
-- Audio directo: `.mp3`, `.m4a`, `.wav`, `.ogg`, `.opus`, `.flac`, `.aac`, `.webm`, `.mp4`.
-
-## Variables en Railway
+En Railway → servicio del bot → Variables:
 
 ```env
 DISCORD_TOKEN=TU_TOKEN_DEL_BOT
 GUILD_ID=ID_DE_TU_SERVIDOR
-YOUTUBE_COOKIE=OPCIONAL_PARA_ERROR_429
-STREAM_BACKEND=auto
 VOICE_TIMEOUT_MS=120000
 VOICE_SELF_DEAF=true
+DEFAULT_VOLUME=85
+MAX_PLAYLIST_ITEMS=25
 ```
 
-## Importante sobre YouTube 429
+Para evitar bloqueo 429 de YouTube en Railway:
 
-Si Railway muestra `Status code: 429`, YouTube está bloqueando la IP del host. El bot ya prueba varios backends, pero si la IP está bloqueada necesitas `YOUTUBE_COOKIE`, una IP limpia/proxy, o probar SoundCloud/audio directo.
+```env
+YOUTUBE_COOKIE=TU_COOKIE_NUEVA_DE_YOUTUBE
+```
 
-## Importante sobre voz / signalling
+**Usa una cuenta secundaria para la cookie. No pegues la cookie en chats ni capturas.**
 
-Si `/testvoz` queda en `signalling`, revisa:
+## 🔗 Invitación del bot
 
-1. El bot tiene permisos en ese canal: **Ver canales**, **Conectarse**, **Hablar**.
-2. El canal es voz normal, no Stage/Escenario.
-3. La región del canal está en Automático.
-4. Si el host no permite Discord Voice/UDP, usa un host/VPS que sí lo permita.
-
-## OAuth2
+En Discord Developer Portal → OAuth2 → URL Generator:
 
 Scopes:
 
@@ -63,18 +44,45 @@ bot
 applications.commands
 ```
 
-Permisos mínimos:
+Permisos:
 
 ```txt
 Ver canales
 Enviar mensajes
+Insertar enlaces
 Leer historial de mensajes
 Usar comandos de barra diagonal
 Conectarse
 Hablar
-Insertar enlaces
-Añadir reacciones
+Usar actividad de voz
 Usar sonidos externos
 ```
 
-Créditos: **DEVJUANCHO • JuanStudio**
+## 🎮 Comandos
+
+```txt
+/help
+/play busqueda
+/juanplay busqueda
+/buscar busqueda
+/recomendados busqueda
+/nowplaying
+/queue
+/skip
+/stop
+/pause
+/resume
+/volume numero
+/testvoz
+/diagnostico
+/plataformas
+/creditos
+/leave
+/ping
+```
+
+## 🛠️ Si falla
+
+- Si sale `429`, YouTube bloqueó la IP del hosting. Agrega `YOUTUBE_COOKIE` nueva.
+- Si sale `signalling` o no entra a voz, revisa permisos del canal de voz o usa un hosting que permita Discord Voice/UDP.
+- Prueba primero `/diagnostico` y `/testvoz`.
