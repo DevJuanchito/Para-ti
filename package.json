@@ -1,19 +1,23 @@
 {
-  "name": "juanplay-devjuancho",
-  "version": "1.0.1",
-  "description": "JUANPLAY - bot de música profesional para Discord creado por DEVJUANCHO, listo para Railway.",
+  "name": "juanplay-devjuancho-definitivo",
+  "version": "6.0.0",
+  "description": "JUANPLAY Music Bot definitivo por DEVJUANCHO / JuanStudio. YouTube, SoundCloud, links directos, búsqueda por nombre, recomendaciones y comandos slash.",
   "main": "index.js",
+  "type": "commonjs",
   "scripts": {
-    "start": "node index.js"
+    "start": "node index.js",
+    "check": "node --check index.js"
   },
   "engines": {
     "node": ">=20.0.0"
   },
   "dependencies": {
-    "@discordjs/voice": "^0.17.0",
-    "discord.js": "^14.16.3",
-    "libsodium-wrappers": "^0.7.15",
-    "opusscript": "0.0.8",
-    "prism-media": "^1.3.5"
+    "@discordjs/voice": "latest",
+    "discord.js": "latest",
+    "ffmpeg-static": "latest",
+    "libsodium-wrappers": "latest",
+    "prism-media": "latest",
+    "youtube-dl-exec": "latest",
+    "yt-search": "latest"
   }
 }
