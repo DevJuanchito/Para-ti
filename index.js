@@ -1,7 +1,7 @@
 /*
-  🎧 JUANPLAY DEVJUANCHO DEFINITIVO v7
+  🎧 JUANPLAY DEVJUANCHO DEFINITIVO v8
   Creado para DEVJUANCHO / JuanStudio
-  Discord Music Bot con comandos slash, recomendaciones, yt-dlp y diseño personalizado.
+  Discord Music Bot con comandos slash, recomendaciones automáticas, botones, yt-dlp y diseño premium personalizado.
 */
 
 const http = require('node:http');
@@ -48,7 +48,11 @@ const VOICE_SELF_DEAF = String(process.env.VOICE_SELF_DEAF || 'true').toLowerCas
 const DEFAULT_VOLUME = Math.max(1, Math.min(200, Number(process.env.DEFAULT_VOLUME || 85))) / 100;
 const MAX_PLAYLIST_ITEMS = Math.max(1, Math.min(100, Number(process.env.MAX_PLAYLIST_ITEMS || 25)));
 const BOT_COLOR = process.env.BOT_COLOR || '#ff2f7d';
-const BRAND = 'DEVJUANCHO • JuanStudio • JUANPLAY v7';
+const VERSION = 'v8';
+const BRAND = `DEVJUANCHO • JuanStudio • JUANPLAY ${VERSION}`;
+const AUTO_RECOMMEND_AFTER_END = String(process.env.AUTO_RECOMMEND_AFTER_END || 'true').toLowerCase() !== 'false';
+const RECOMMENDATION_COUNT = Math.max(3, Math.min(10, Number(process.env.RECOMMENDATION_COUNT || 5)));
+const DEFAULT_EMOJI = process.env.DEFAULT_EMOJI || '🐵';
 const USER_AGENT = process.env.USER_AGENT || 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36';
 
 if (!TOKEN) {
@@ -71,34 +75,59 @@ function makeEmbed(title, description, color = BOT_COLOR) {
     .setColor(color)
     .setTitle(title)
     .setDescription(description || '')
-    .setFooter({ text: BRAND })
+    .setFooter({ text: `${BRAND} • Premium personalizado` })
     .setTimestamp();
 }
 
-function okEmbed(title, description) {
-  return makeEmbed(`✅ ${title}`, description, '#2ecc71');
+function decorateUser(embed, userOrInteraction, label = 'Usado por') {
+  const user = userOrInteraction?.user || userOrInteraction;
+  const member = userOrInteraction?.member;
+  const name = member?.displayName || user?.globalName || user?.username;
+  if (user && name) {
+    embed.setAuthor({
+      name: `${label} ${name}`,
+      iconURL: user.displayAvatarURL?.({ size: 128 }) || undefined,
+    });
+  }
+  return embed;
 }
 
-function warnEmbed(title, description) {
-  return makeEmbed(`⚠️ ${title}`, description, '#f1c40f');
+function okEmbed(title, description, user = null) {
+  return decorateUser(makeEmbed(`✅ ${title}`, description, '#2ecc71'), user, 'Acción de');
 }
 
-function errEmbed(title, description) {
-  return makeEmbed(`❌ ${title}`, description, '#ff2f7d');
+function warnEmbed(title, description, user = null) {
+  return decorateUser(makeEmbed(`⚠️ ${title}`, description, '#f1c40f'), user, 'Aviso para');
 }
 
-function musicEmbed(title, description) {
-  return makeEmbed(`🎧 ${title}`, description, BOT_COLOR);
+function errEmbed(title, description, user = null) {
+  return decorateUser(makeEmbed(`❌ ${title}`, description, '#ff2f7d'), user, 'Error para');
+}
+
+function musicEmbed(title, description, user = null) {
+  return decorateUser(makeEmbed(`${DEFAULT_EMOJI} ${title}`, description, BOT_COLOR), user, 'JUANPLAY usado por');
 }
 
 function nowPlayingEmbed(track) {
-  const embed = musicEmbed('JUANPLAY está sonando', `**[${escapeMd(track.title)}](${track.url})**\n\n👤 Pedido por: **${escapeMd(track.requestedBy || 'alguien')}**\n⏱️ Duración: **${track.duration || 'desconocida'}**\n🌐 Fuente: **${track.source || 'yt-dlp'}**`);
+  const requester = track.requestedById ? `<@${track.requestedById}>` : `**${escapeMd(track.requestedBy || 'alguien')}**`;
+  const embed = musicEmbed('JUANPLAY MUSIC • Reproduciendo ahora', `### 🎶 [${escapeMd(track.title)}](${track.url})\n\n> 👤 **Lo pidió:** ${requester}\n> ⏱️ **Duración:** \`${track.duration || 'desconocida'}\`\n> 🌐 **Fuente:** \`${track.source || 'yt-dlp'}\`\n> 🔊 **Estado:** Música activa en tu canal de voz`);
+  embed.addFields(
+    { name: '✨ Modo', value: 'Premium DEVJUANCHO', inline: true },
+    { name: '🎛️ Controles', value: 'Usa los botones de abajo', inline: true },
+    { name: '💡 Tip', value: 'Cuando termine y la cola quede vacía, te doy recomendadas similares.', inline: false },
+  );
   if (track.thumbnail) embed.setThumbnail(track.thumbnail);
+  if (track.requestedByAvatar) embed.setAuthor({ name: `Pedido por ${track.requestedBy || 'usuario'}`, iconURL: track.requestedByAvatar });
   return embed;
 }
 
 function trackLine(track, index) {
-  return `**${index}.** [${escapeMd(track.title)}](${track.url}) — \`${track.duration || '??'}\``;
+  const requester = track.requestedById ? ` • pedido por <@${track.requestedById}>` : (track.requestedBy ? ` • pedido por ${escapeMd(track.requestedBy)}` : '');
+  return `**${index}.** [${escapeMd(track.title)}](${track.url}) — \`${track.duration || '??'}\`${requester}`;
+}
+
+function fancyDivider() {
+  return '━━━━━━━━━━━━━━━━━━━━';
 }
 
 function escapeMd(text) {
@@ -210,12 +239,28 @@ function getQueue(guildId) {
     volume: DEFAULT_VOLUME,
     locked: false,
     lastError: null,
+    history: [],
+    lastRecommendations: [],
+    suppressRecommendation: false,
   };
 
   player.on(AudioPlayerStatus.Idle, () => {
-    stopTrackProcess(q.current);
+    const ended = q.current;
+    const shouldRecommend = Boolean(ended && !q.suppressRecommendation && AUTO_RECOMMEND_AFTER_END && q.tracks.length === 0);
+    stopTrackProcess(ended);
+    if (ended) {
+      ended.finishedAt = Date.now();
+      q.history.unshift({ ...ended, process: null });
+      q.history = q.history.slice(0, 25);
+    }
     q.current = null;
-    setTimeout(() => playNext(guildId).catch(console.error), 350);
+    q.suppressRecommendation = false;
+
+    if (shouldRecommend && q.textChannel) {
+      sendEndRecommendations(q, ended).catch((error) => console.warn('[JUANPLAY] No pude enviar recomendados automáticos:', error.message));
+    }
+
+    setTimeout(() => playNext(guildId).catch(console.error), 650);
   });
 
   player.on('error', (error) => {
@@ -324,7 +369,7 @@ async function playNext(guildId) {
     q.player.play(resource);
 
     if (q.textChannel) {
-      q.textChannel.send({ embeds: [nowPlayingEmbed(next)] }).catch(() => {});
+      q.textChannel.send({ embeds: [nowPlayingEmbed(next)], components: controlRows() }).catch(() => {});
     }
   } catch (error) {
     q.lastError = error;
@@ -615,16 +660,21 @@ async function handlePlay(interaction, query, fromButtonTrack = null) {
     }
 
     for (const track of tracks) {
-      track.requestedBy = interaction.user.username;
+      track.requestedBy = interaction.member?.displayName || interaction.user.globalName || interaction.user.username;
+      track.requestedById = interaction.user.id;
+      track.requestedByAvatar = interaction.user.displayAvatarURL({ size: 128 });
+      track.requestedAt = Date.now();
       q.tracks.push(track);
     }
 
     const first = tracks[0];
+    const requester = `<@${interaction.user.id}>`;
     const description = tracks.length === 1
-      ? `Agregué a la cola:\n\n**[${escapeMd(first.title)}](${first.url})**\n\n⏱️ ${first.duration || 'desconocida'} • 🌐 ${first.source || 'YouTube'}`
-      : `Agregué **${tracks.length} canciones** a la cola.\n\nPrimera: **[${escapeMd(first.title)}](${first.url})**`;
+      ? `### 🎵 Agregué esta canción a la cola\n**[${escapeMd(first.title)}](${first.url})**\n\n${fancyDivider()}\n👤 **Usuario:** ${requester}\n⏱️ **Duración:** \`${first.duration || 'desconocida'}\`\n🌐 **Fuente:** \`${first.source || 'YouTube'}\`\n📌 **Posición:** ${q.current ? `#${q.tracks.length}` : 'suena ahora'}`
+      : `### 📀 Playlist agregada\nAgregué **${tracks.length} canciones** a la cola.\n\n👤 **Usuario:** ${requester}\n🎶 **Primera:** [${escapeMd(first.title)}](${first.url})`;
 
-    const embed = musicEmbed('JUANPLAY agregado', description);
+    const embed = musicEmbed('JUANPLAY agregado con estilo', description, interaction);
+    embed.addFields({ name: '🎛️ Controles', value: 'Cuando empiece a sonar aparecerán botones para pausar, seguir, saltar o detener.', inline: false });
     if (first.thumbnail) embed.setThumbnail(first.thumbnail);
 
     await interaction.editReply({ embeds: [embed] });
@@ -644,30 +694,147 @@ async function handleSearch(interaction) {
   const query = interaction.options.getString('busqueda', true);
   await interaction.deferReply();
   const results = await searchYouTube(query, 10);
-  if (!results.length) return interaction.editReply({ embeds: [errEmbed('Sin recomendados', 'No encontré resultados para esa búsqueda.')] });
+  if (!results.length) return interaction.editReply({ embeds: [errEmbed('Sin recomendados', 'No encontré resultados para esa búsqueda.', interaction)] });
 
+  const payload = buildRecommendationsPayload({
+    title: 'Recomendados elegantes para ti',
+    description: `🔎 Búsqueda: **${escapeMd(query)}**\n${fancyDivider()}\n${results.map(trackLine).join('\n')}`,
+    results,
+    user: interaction,
+    seed: query,
+    thumbnail: results[0]?.thumbnail,
+  });
+
+  return interaction.editReply(payload);
+}
+
+async function handleSimilar(interaction) {
+  await interaction.deferReply();
+  const q = getQueue(interaction.guild.id);
+  const seedTrack = q.current || q.history[0];
+  if (!seedTrack) {
+    return interaction.editReply({ embeds: [warnEmbed('Aún no hay base para recomendar', 'Pon una canción con `/play` y luego usa `/similares`.', interaction)] });
+  }
+  const results = await getSimilarRecommendations(seedTrack, RECOMMENDATION_COUNT + 5, q);
+  if (!results.length) return interaction.editReply({ embeds: [errEmbed('Sin similares', 'No pude encontrar recomendadas para esa canción.', interaction)] });
+  return interaction.editReply(buildRecommendationsPayload({
+    title: 'Similares según lo que sonó',
+    description: `Basado en:\n### 🎶 [${escapeMd(seedTrack.title)}](${seedTrack.url})\n${fancyDivider()}\n${results.map(trackLine).join('\n')}`,
+    results,
+    user: interaction,
+    seed: seedTrack.title,
+    thumbnail: seedTrack.thumbnail || results[0]?.thumbnail,
+  }));
+}
+
+async function sendEndRecommendations(q, endedTrack) {
+  const results = await getSimilarRecommendations(endedTrack, RECOMMENDATION_COUNT + 5, q);
+  if (!results.length) return;
+  q.lastRecommendations = results;
+
+  const payload = buildRecommendationsPayload({
+    title: 'Terminó la canción • Recomendadas para seguir',
+    description: `Acabó:\n### ✅ [${escapeMd(endedTrack.title)}](${endedTrack.url})\n\nTe dejo canciones parecidas para que sigas el mood. Toca un botón y la agrego al canal de voz.\n${fancyDivider()}\n${results.slice(0, RECOMMENDATION_COUNT).map(trackLine).join('\n')}`,
+    results: results.slice(0, RECOMMENDATION_COUNT),
+    seed: endedTrack.title,
+    thumbnail: endedTrack.thumbnail || results[0]?.thumbnail,
+  });
+  await q.textChannel.send(payload).catch(() => {});
+}
+
+async function getSimilarRecommendations(track, limit = 8, q = null) {
+  const seed = recommendationSeed(track);
+  const queries = [
+    `${seed} canciones similares`,
+    `${seed} mix`,
+    `${seed} radio`,
+  ];
+
+  const seen = new Set([normalizeKey(track?.url), normalizeKey(track?.title)]);
+  for (const old of q?.history || []) {
+    seen.add(normalizeKey(old.url));
+    seen.add(normalizeKey(old.title));
+  }
+
+  const combined = [];
+  for (const query of queries) {
+    const found = await searchYouTube(query, Math.max(limit, 8)).catch(() => []);
+    for (const item of found) {
+      const keyUrl = normalizeKey(item.url);
+      const keyTitle = normalizeKey(item.title);
+      if (!keyUrl || seen.has(keyUrl) || seen.has(keyTitle)) continue;
+      seen.add(keyUrl);
+      seen.add(keyTitle);
+      combined.push(item);
+      if (combined.length >= limit) return combined;
+    }
+  }
+  return combined;
+}
+
+function recommendationSeed(track) {
+  return cleanSearchText(String(track?.title || '')
+    .replace(/\b(official|video|lyrics|letra|audio|visualizer|hd|4k)\b/ig, '')
+    .replace(/\([^)]*\)|\[[^\]]*\]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim()) || track?.title || 'musica recomendada';
+}
+
+function normalizeKey(value) {
+  return String(value || '').toLowerCase().replace(/https?:\/\/(www\.)?/, '').replace(/[^a-z0-9]+/g, '').slice(0, 80);
+}
+
+function cacheResults(results, seed = '') {
   const id = `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
-  searchCache.set(id, { createdAt: Date.now(), results });
+  searchCache.set(id, { createdAt: Date.now(), results, seed });
+  return id;
+}
 
-  const embed = musicEmbed('Recomendados para ti', results.map(trackLine).join('\n'));
-  if (results[0]?.thumbnail) embed.setThumbnail(results[0].thumbnail);
+function buildRecommendationsPayload({ title, description, results, user = null, seed = '', thumbnail = null }) {
+  const id = cacheResults(results, seed);
+  const embed = musicEmbed(title, description, user);
+  embed.addFields(
+    { name: '▶️ Cómo usar', value: 'Toca un número para reproducir esa recomendada.', inline: false },
+    { name: '👤 Usuario', value: user?.user ? `<@${user.user.id}>` : 'Recomendación automática JUANPLAY', inline: true },
+    { name: '🔥 Estilo', value: 'Similar al mood anterior', inline: true },
+  );
+  if (thumbnail) embed.setThumbnail(thumbnail);
+  return { embeds: [embed], components: recommendationRows(id, results) };
+}
 
+function recommendationRows(id, results) {
   const rows = [];
-  for (let row = 0; row < Math.ceil(results.length / 5); row++) {
+  const max = Math.min(results.length, 10);
+  for (let row = 0; row < Math.ceil(max / 5); row++) {
     const actionRow = new ActionRowBuilder();
-    for (let i = row * 5; i < Math.min(results.length, row * 5 + 5); i++) {
+    for (let i = row * 5; i < Math.min(max, row * 5 + 5); i++) {
       actionRow.addComponents(
         new ButtonBuilder()
           .setCustomId(`jp_pick:${id}:${i}`)
           .setLabel(`${i + 1}`)
-          .setEmoji('▶️')
-          .setStyle(ButtonStyle.Primary)
+          .setEmoji('🎵')
+          .setStyle(i === 0 ? ButtonStyle.Success : ButtonStyle.Primary)
       );
     }
     rows.push(actionRow);
   }
+  if (rows.length < 5) {
+    rows.push(new ActionRowBuilder().addComponents(
+      new ButtonBuilder().setCustomId(`jp_more:${id}`).setLabel('Más similares').setEmoji('✨').setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder().setCustomId('jp_queue').setLabel('Ver cola').setEmoji('📜').setStyle(ButtonStyle.Secondary),
+    ));
+  }
+  return rows;
+}
 
-  return interaction.editReply({ embeds: [embed], components: rows });
+function controlRows() {
+  return [new ActionRowBuilder().addComponents(
+    new ButtonBuilder().setCustomId('jp_pause').setLabel('Pausar').setEmoji('⏸️').setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId('jp_resume').setLabel('Seguir').setEmoji('▶️').setStyle(ButtonStyle.Success),
+    new ButtonBuilder().setCustomId('jp_skip').setLabel('Saltar').setEmoji('⏭️').setStyle(ButtonStyle.Primary),
+    new ButtonBuilder().setCustomId('jp_queue').setLabel('Cola').setEmoji('📜').setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId('jp_stop').setLabel('Stop').setEmoji('⏹️').setStyle(ButtonStyle.Danger),
+  )];
 }
 
 async function handleAutocomplete(interaction) {
@@ -694,13 +861,62 @@ async function handleAutocomplete(interaction) {
 }
 
 async function handleButton(interaction) {
-  const [prefix, id, indexRaw] = interaction.customId.split(':');
-  if (prefix !== 'jp_pick') return;
-  const cached = searchCache.get(id);
-  const index = Number(indexRaw);
-  const track = cached?.results?.[index];
-  if (!track) return interaction.reply({ embeds: [errEmbed('Botón expirado', 'Haz `/buscar` otra vez para generar recomendados nuevos.')], ephemeral: true });
-  await handlePlay(interaction, track.title, track);
+  if (interaction.customId.startsWith('jp_pick:')) {
+    const [, id, indexRaw] = interaction.customId.split(':');
+    const cached = searchCache.get(id);
+    const index = Number(indexRaw);
+    const track = cached?.results?.[index];
+    if (!track) return interaction.reply({ embeds: [errEmbed('Botón expirado', 'Haz `/buscar` otra vez para generar recomendados nuevos.', interaction)], ephemeral: true });
+    return handlePlay(interaction, track.title, track);
+  }
+
+  if (interaction.customId.startsWith('jp_more:')) {
+    const [, id] = interaction.customId.split(':');
+    const cached = searchCache.get(id);
+    const seed = cached?.seed || cached?.results?.[0]?.title;
+    if (!seed) return interaction.reply({ embeds: [errEmbed('Botón expirado', 'Haz `/recomendados` otra vez.', interaction)], ephemeral: true });
+    await interaction.deferReply();
+    const pseudoTrack = { title: seed, url: cached?.results?.[0]?.url || '' };
+    const q = getQueue(interaction.guild.id);
+    const results = await getSimilarRecommendations(pseudoTrack, 10, q);
+    if (!results.length) return interaction.editReply({ embeds: [warnEmbed('No encontré más similares', 'Prueba con otro nombre de canción.', interaction)] });
+    return interaction.editReply(buildRecommendationsPayload({
+      title: 'Más recomendadas JUANPLAY',
+      description: `Basado en: **${escapeMd(seed)}**\n${fancyDivider()}\n${results.map(trackLine).join('\n')}`,
+      results,
+      user: interaction,
+      seed,
+      thumbnail: results[0]?.thumbnail,
+    }));
+  }
+
+  const q = getQueue(interaction.guild.id);
+  if (interaction.customId === 'jp_pause') {
+    const ok = q.player.pause(true);
+    return interaction.reply({ embeds: [ok ? okEmbed('Pausado', 'La música quedó pausada.', interaction) : warnEmbed('No pude pausar', 'No hay música sonando.', interaction)], ephemeral: true });
+  }
+  if (interaction.customId === 'jp_resume') {
+    const ok = q.player.unpause();
+    return interaction.reply({ embeds: [ok ? okEmbed('Reanudado', 'La música sigue sonando.', interaction) : warnEmbed('No pude reanudar', 'No hay música pausada.', interaction)], ephemeral: true });
+  }
+  if (interaction.customId === 'jp_skip') {
+    if (!q.current) return interaction.reply({ embeds: [warnEmbed('Sin canción', 'No hay nada para saltar.', interaction)], ephemeral: true });
+    q.suppressRecommendation = true;
+    q.player.stop(true);
+    return interaction.reply({ embeds: [okEmbed('Saltado', 'Pasando a la siguiente canción.', interaction)], ephemeral: true });
+  }
+  if (interaction.customId === 'jp_stop') {
+    q.suppressRecommendation = true;
+    q.tracks = [];
+    stopTrackProcess(q.current);
+    q.current = null;
+    q.player.stop(true);
+    return interaction.reply({ embeds: [okEmbed('Detenido', 'Música detenida y cola limpiada.', interaction)], ephemeral: true });
+  }
+  if (interaction.customId === 'jp_queue') {
+    const lines = buildQueueLines(q);
+    return interaction.reply({ embeds: [musicEmbed('Cola JUANPLAY', lines || 'La cola está vacía. Usa `/play` o `/buscar`.', interaction)], ephemeral: true });
+  }
 }
 
 function cleanSearchCache() {
@@ -737,6 +953,9 @@ function buildCommands() {
       .setName('recomendados')
       .setDescription('🎯 Recomendados bonitos para elegir rápido')
       .addStringOption(playOption),
+
+    new SlashCommandBuilder().setName('similares').setDescription('✨ Recomienda canciones parecidas a la actual o última'),
+    new SlashCommandBuilder().setName('historial').setDescription('🕘 Muestra canciones reproducidas recientemente'),
 
     new SlashCommandBuilder().setName('queue').setDescription('📜 Muestra la cola de música'),
     new SlashCommandBuilder().setName('nowplaying').setDescription('💿 Muestra la canción actual'),
@@ -784,6 +1003,19 @@ client.once('clientReady', async () => {
   }
 });
 
+function buildQueueLines(q) {
+  const lines = [];
+  if (q.current) lines.push(`🎧 **Actual:** [${escapeMd(q.current.title)}](${q.current.url})${q.current.requestedById ? ` • <@${q.current.requestedById}>` : ''}`);
+  if (q.tracks.length) lines.push(q.tracks.slice(0, 10).map(trackLine).join('\n'));
+  if (q.tracks.length > 10) lines.push(`\n...y **${q.tracks.length - 10}** más.`);
+  return lines.join('\n\n');
+}
+
+function buildHistoryLines(q) {
+  if (!q.history.length) return 'Aún no hay historial. Reproduce algo con `/play`.';
+  return q.history.slice(0, 10).map((track, i) => `**${i + 1}.** [${escapeMd(track.title)}](${track.url}) — \`${track.duration || '??'}\``).join('\n');
+}
+
 client.on('interactionCreate', async (interaction) => {
   try {
     if (interaction.isAutocomplete()) return handleAutocomplete(interaction);
@@ -797,9 +1029,10 @@ client.on('interactionCreate', async (interaction) => {
     }
 
     if (name === 'buscar' || name === 'recomendados') return handleSearch(interaction);
+    if (name === 'similares') return handleSimilar(interaction);
 
     if (name === 'ping') {
-      return interaction.reply({ embeds: [okEmbed('Pong', `Latencia: **${Math.round(client.ws.ping)} ms**`)] });
+      return interaction.reply({ embeds: [okEmbed('Pong', `Latencia: **${Math.round(client.ws.ping)} ms**`, interaction)] });
     }
 
     if (name === 'help') return interaction.reply({ embeds: [helpEmbed()] });
@@ -812,56 +1045,61 @@ client.on('interactionCreate', async (interaction) => {
     const q = getQueue(interaction.guild.id);
 
     if (name === 'queue') {
-      const lines = [];
-      if (q.current) lines.push(`🎧 **Actual:** [${escapeMd(q.current.title)}](${q.current.url})`);
-      if (q.tracks.length) lines.push(q.tracks.slice(0, 10).map(trackLine).join('\n'));
-      return interaction.reply({ embeds: [musicEmbed('Cola JUANPLAY', lines.join('\n\n') || 'La cola está vacía. Usa `/play` o `/buscar`.')] });
+      const lines = buildQueueLines(q);
+      return interaction.reply({ embeds: [musicEmbed('Cola JUANPLAY', lines || 'La cola está vacía. Usa `/play` o `/buscar`.', interaction)] });
+    }
+
+    if (name === 'historial') {
+      return interaction.reply({ embeds: [musicEmbed('Historial reciente', buildHistoryLines(q), interaction)] });
     }
 
     if (name === 'nowplaying') {
-      if (!q.current) return interaction.reply({ embeds: [warnEmbed('Nada sonando', 'Usa `/play nombre o link` para empezar.')] });
-      return interaction.reply({ embeds: [nowPlayingEmbed(q.current)] });
+      if (!q.current) return interaction.reply({ embeds: [warnEmbed('Nada sonando', 'Usa `/play nombre o link` para empezar.', interaction)] });
+      return interaction.reply({ embeds: [nowPlayingEmbed(q.current)], components: controlRows() });
     }
 
     if (name === 'skip') {
-      if (!q.current) return interaction.reply({ embeds: [warnEmbed('Sin canción', 'No hay nada para saltar.')] });
+      if (!q.current) return interaction.reply({ embeds: [warnEmbed('Sin canción', 'No hay nada para saltar.', interaction)] });
+      q.suppressRecommendation = true;
       q.player.stop(true);
-      return interaction.reply({ embeds: [okEmbed('Saltado', 'Pasando a la siguiente canción.')] });
+      return interaction.reply({ embeds: [okEmbed('Saltado', 'Pasando a la siguiente canción.', interaction)] });
     }
 
     if (name === 'stop') {
+      q.suppressRecommendation = true;
       q.tracks = [];
       stopTrackProcess(q.current);
       q.current = null;
       q.player.stop(true);
-      return interaction.reply({ embeds: [okEmbed('Detenido', 'Música detenida y cola limpiada.')] });
+      return interaction.reply({ embeds: [okEmbed('Detenido', 'Música detenida y cola limpiada.', interaction)] });
     }
 
     if (name === 'pause') {
       const ok = q.player.pause(true);
-      return interaction.reply({ embeds: [ok ? okEmbed('Pausado', 'La música quedó pausada.') : warnEmbed('No pude pausar', 'No hay música sonando.')] });
+      return interaction.reply({ embeds: [ok ? okEmbed('Pausado', 'La música quedó pausada.', interaction) : warnEmbed('No pude pausar', 'No hay música sonando.', interaction)] });
     }
 
     if (name === 'resume') {
       const ok = q.player.unpause();
-      return interaction.reply({ embeds: [ok ? okEmbed('Reanudado', 'La música sigue sonando.') : warnEmbed('No pude reanudar', 'No hay música pausada.')] });
+      return interaction.reply({ embeds: [ok ? okEmbed('Reanudado', 'La música sigue sonando.', interaction) : warnEmbed('No pude reanudar', 'No hay música pausada.', interaction)] });
     }
 
     if (name === 'volume') {
       const num = interaction.options.getInteger('numero', true);
       q.volume = Math.max(1, Math.min(200, num)) / 100;
       if (q.player.state.resource?.volume) q.player.state.resource.volume.setVolume(q.volume);
-      return interaction.reply({ embeds: [okEmbed('Volumen actualizado', `Volumen: **${num}%**`)] });
+      return interaction.reply({ embeds: [okEmbed('Volumen actualizado', `Volumen: **${num}%**`, interaction)] });
     }
 
     if (name === 'leave') {
+      q.suppressRecommendation = true;
       q.tracks = [];
       stopTrackProcess(q.current);
       q.current = null;
       q.player.stop(true);
       try { q.connection?.destroy(); } catch (_) {}
       q.connection = null;
-      return interaction.reply({ embeds: [okEmbed('Me fui del canal', 'JUANPLAY salió del canal de voz.')] });
+      return interaction.reply({ embeds: [okEmbed('Me fui del canal', 'JUANPLAY salió del canal de voz.', interaction)] });
     }
   } catch (error) {
     console.error('[JUANPLAY] Error ejecutando comando:', error);
@@ -898,6 +1136,8 @@ async function handleDiagnostico(interaction) {
     `📌 Estado voz: **${q.connection?.state?.status || 'sin conexión'}**`,
     `🎧 Actual: **${q.current ? escapeMd(q.current.title) : 'nada'}**`,
     `📜 Cola: **${q.tracks.length}**`,
+    `✨ Auto recomendados: **${AUTO_RECOMMEND_AFTER_END ? 'activado' : 'apagado'}**`,
+    `🕘 Historial: **${q.history.length}**`,
   ];
   if (q.lastError) lines.push(`\nÚltimo error: \`${cut(q.lastError.message || q.lastError, 700)}\``);
   return interaction.reply({ embeds: [musicEmbed('Diagnóstico JUANPLAY', lines.join('\n'))], ephemeral: true });
@@ -909,6 +1149,8 @@ function helpEmbed() {
     '`/juanplay busqueda` — comando principal personalizado.',
     '`/buscar busqueda` — muestra recomendados con botones.',
     '`/recomendados busqueda` — igual que buscar, con resultados bonitos.',
+    '`/similares` — recomienda canciones parecidas a la actual o última.',
+    '`/historial` — últimas canciones reproducidas.',
     '`/queue` — cola.',
     '`/nowplaying` — canción actual.',
     '`/skip` `/stop` `/pause` `/resume` — controles.',
@@ -949,9 +1191,9 @@ function creditsEmbed() {
   return musicEmbed('Créditos', [
     '👑 **DEVJUANCHO**',
     '🏗️ **JuanStudio**',
-    '🎧 **JUANPLAY Music Bot Definitivo v7**',
+    '🎧 **JUANPLAY Music Bot Definitivo v8**',
     '',
-    'Personalizado, decorado y optimizado para música con comandos slash.',
+    'Personalizado, decorado, con botones, usuario visible, historial y recomendados automáticos.',
   ].join('\n'));
 }
 
@@ -960,7 +1202,7 @@ function startHealthServer() {
   if (!port) return;
   const server = http.createServer((req, res) => {
     res.writeHead(200, { 'content-type': 'application/json' });
-    res.end(JSON.stringify({ ok: true, bot: 'JUANPLAY', version: '6.0.0', user: client.user?.tag || null }));
+    res.end(JSON.stringify({ ok: true, bot: 'JUANPLAY', version: '8.0.0', user: client.user?.tag || null }));
   });
   server.listen(port, () => console.log(`🌐 Health server activo en puerto ${port}`));
 }

@@ -1,16 +1,40 @@
-# 🎧 JUANPLAY DEVJUANCHO DEFINITIVO v7
+# 🎧 JUANPLAY DEVJUANCHO DEFINITIVO v8
 
 Bot de música personalizado para **DEVJUANCHO / JuanStudio**.
 
-## ✅ Qué trae
+## ✅ Novedades v8
 
-- `/play` y `/juanplay` por nombre o link
-- `/buscar` y `/recomendados` con botones
-- YouTube por nombre, link y playlist
-- SoundCloud y links directos de audio
-- Spotify / Apple Music / Deezer: toma el título del link y busca la canción
-- `/diagnostico`, `/testvoz`, `/plataformas`, `/creditos`
-- Arreglo incluido para **Cannot find module @discordjs/opus / opusscript**
+- Diseño más bonito en embeds: títulos grandes, separadores, miniaturas y créditos.
+- Muestra **quién está usando el comando** y quién pidió cada canción.
+- Botones premium: pausar, seguir, saltar, cola y stop.
+- Cuando termina una canción y la cola queda vacía, recomienda canciones parecidas.
+- Botón **Más similares** para seguir buscando canciones del mismo estilo.
+- Nuevo comando `/similares` para recomendar según la canción actual o la última reproducida.
+- Nuevo comando `/historial` para ver lo último que sonó.
+
+## 🎵 Comandos
+
+```txt
+/play
+/juanplay
+/buscar
+/recomendados
+/similares
+/historial
+/queue
+/nowplaying
+/skip
+/stop
+/pause
+/resume
+/volume
+/testvoz
+/diagnostico
+/plataformas
+/creditos
+/leave
+/ping
+```
 
 ## 🚀 Variables en Railway
 
@@ -28,6 +52,10 @@ VOICE_TIMEOUT_MS=120000
 VOICE_SELF_DEAF=true
 DEFAULT_VOLUME=85
 MAX_PLAYLIST_ITEMS=25
+AUTO_RECOMMEND_AFTER_END=true
+RECOMMENDATION_COUNT=5
+DEFAULT_EMOJI=🐵
+BOT_COLOR=#ff2f7d
 ```
 
 Opcional para YouTube 429:
@@ -36,26 +64,16 @@ Opcional para YouTube 429:
 YOUTUBE_COOKIE=TU_COOKIE_NUEVA_DE_YOUTUBE
 ```
 
-## 🍪 ¿Se puede sin cookie?
-
-Sí. Primero prueba sin `YOUTUBE_COOKIE`. Si Railway muestra **429 / Too Many Requests**, YouTube bloqueó la IP del host y ahí sí necesitas una cookie nueva o usar otro hosting/IP.
-
-No pegues cookies ni tokens en chats/capturas. Si ya los compartiste, cierra sesión o cambia contraseña y genera uno nuevo.
-
 ## 🧪 Orden recomendado de prueba
 
 ```txt
 /diagnostico
 /testvoz
-/recomendados paulo londra no puedo
-/play paulo londra no puedo
+/play Paulo Londra No Puedo
+/similares
 ```
 
-## 🔧 Si no suena
-
-- El bot debe tener permisos en el canal: Ver canales, Conectarse, Hablar.
-- Usa un canal de voz normal, no Stage/Escenario.
-- Si `/diagnostico` dice Opus no instalado, Railway no instaló dependencias; usa este ZIP v7 completo.
+Cuando termine la canción, JUANPLAY enviará recomendadas similares con botones.
 
 ---
-👑 Créditos: **DEVJUANCHO • JuanStudio • JUANPLAY v7**
+👑 Créditos: **DEVJUANCHO • JuanStudio • JUANPLAY v8**
