@@ -1,11 +1,13 @@
-# 🎧 JUANPLAY DEVJUANCHO PÚBLICO v8.1
+# 🎧 JUANPLAY DEVJUANCHO PÚBLICO v8.2 SIN COOKIE
 
 Bot de música personalizado para **DEVJUANCHO / JuanStudio**.
 
 Esta versión está pensada para usarla con público: más decorada, menos spam, con cola completa, botones y actividad dinámica que muestra la canción que está sonando.
 
-## ✅ Qué mejoró en v8.1
+## ✅ Qué mejoró en v8.2
 
+- 🚫 **Sin cookie obligatoria:** no tienes que poner ninguna cookie personal en Railway.
+- 🔁 **Reintentos YouTube:** si Railway rechaza un modo, intenta `default`, `android`, `ios`, `mweb` y `web` automáticamente.
 - 🎶 **Actividad dinámica:** el estado del bot cambia a la canción actual.
 - 🎨 **Embeds premium:** mensajes más decorados con marca, footer, mini paneles y thumbnails.
 - 📜 **Cola completa paginada:** `/queue` y `/cola` muestran toda la cola con botones de página.
@@ -81,6 +83,8 @@ VOICE_TIMEOUT_MS=120000
 VOICE_SELF_DEAF=true
 DEFAULT_VOLUME=85
 MAX_PLAYLIST_ITEMS=25
+YOUTUBE_PLAYER_CLIENTS=default,android,ios,mweb,web
+YOUTUBE_FORCE_IPV4=true
 ```
 
 Opcional para `/invite`:
@@ -89,13 +93,6 @@ Opcional para `/invite`:
 BOT_INVITE_URL=TU_LINK_DE_INVITACION
 SUPPORT_SERVER=TU_LINK_DE_SOPORTE
 WEBSITE_URL=TU_WEB
-```
-
-Opcional cuando YouTube bloquea en Railway con 429 o `Sign in to confirm you’re not a bot`:
-
-```env
-YOUTUBE_COOKIE=TU_COOKIE_NUEVA_DE_YOUTUBE
-YOUTUBE_COOKIE_BASE64=OPCIONAL_SI_LA_COOKIE_ESTA_EN_BASE64
 ```
 
 ## 🎨 Perfil del bot
@@ -108,22 +105,11 @@ Listening to 🎶 Nombre de la canción
 
 El **avatar**, **banner** y **descripción/About Me** del bot se cambian en **Discord Developer Portal**, no dentro de `index.js`.
 
-## 🍪 ¿Se puede sin cookie?
+## 🍪 Sobre cookies
 
-### Cómo resolver el error `Sign in to confirm you’re not a bot`
+Esta versión **no te pide cookie** y no trae variable `YOUTUBE_COOKIE` en el `.env.example`.
 
-1. Usa una cuenta secundaria de YouTube.
-2. Exporta cookies de YouTube en formato Netscape o copia el header `Cookie:`.
-3. En Railway entra a **Variables** y agrega `YOUTUBE_COOKIE`.
-4. Haz **Redeploy** del bot.
-5. Ejecuta `/diagnostico`; debe decir `YOUTUBE_COOKIE: configurada`.
-
-JUANPLAY v8.1 también evita el `Unhandled rejection` de yt-dlp y reduce spam: si YouTube bloquea sin cookie, solo avisa una vez por ventana de tiempo y limpia canciones de YouTube pendientes para no llenar el chat.
-
-
-Sí. Primero prueba sin `YOUTUBE_COOKIE`. Si Railway muestra **429 / Too Many Requests** o **Sign in to confirm you’re not a bot**, YouTube bloqueó o limitó la IP del host y ahí sí necesitas una cookie nueva o usar otro hosting/IP.
-
-No pegues cookies ni tokens en chats/capturas. Si ya los compartiste, cierra sesión o cambia contraseña y genera uno nuevo.
+Si YouTube rechaza un video en Railway, JUANPLAY intenta varios clientes alternativos sin cookie. Si aun así un video falla, prueba otro resultado, otro link, SoundCloud o un link directo de audio.
 
 ## 🧪 Orden recomendado de prueba
 
@@ -142,8 +128,13 @@ No pegues cookies ni tokens en chats/capturas. Si ya los compartiste, cierra ses
 - El bot debe tener permisos en el canal: Ver canales, Conectarse, Hablar.
 - Usa un canal de voz normal, no Stage/Escenario.
 - Si `/diagnostico` dice Opus no instalado, Railway no instaló dependencias; revisa `package.json`.
-- Si YouTube bloquea con 429 o `Sign in to confirm you’re not a bot`, agrega `YOUTUBE_COOKIE` nueva en Railway, haz redeploy o usa otro hosting/IP.
+- Si un video de YouTube falla, prueba otro resultado, otro link o SoundCloud/link directo.
+- Para probar otros modos puedes cambiar `YOUTUBE_PLAYER_CLIENTS`, por ejemplo:
+
+```env
+YOUTUBE_PLAYER_CLIENTS=android,ios,mweb,web,default
+```
 
 ---
 
-👑 Créditos: **DEVJUANCHO • JuanStudio • JUANPLAY v8.1**
+👑 Créditos: **DEVJUANCHO • JuanStudio • JUANPLAY v8.2**
