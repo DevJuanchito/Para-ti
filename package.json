@@ -1,7 +1,7 @@
 {
-  "name": "juanplay-devjuancho-definitivo",
-  "version": "6.0.0",
-  "description": "JUANPLAY Music Bot definitivo por DEVJUANCHO / JuanStudio. YouTube, SoundCloud, links directos, búsqueda por nombre, recomendaciones y comandos slash.",
+  "name": "juanplay-devjuancho-definitivo-v7",
+  "version": "7.0.0",
+  "description": "JUANPLAY Music Bot definitivo v7 por DEVJUANCHO / JuanStudio. Arreglado Opus, YouTube links/nombres, recomendaciones, yt-dlp y modo sin cookie.",
   "main": "index.js",
   "type": "commonjs",
   "scripts": {
@@ -18,6 +18,7 @@
     "libsodium-wrappers": "latest",
     "prism-media": "latest",
     "youtube-dl-exec": "latest",
-    "yt-search": "latest"
+    "yt-search": "latest",
+    "opusscript": "latest"
   }
 }

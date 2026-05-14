@@ -1,5 +1,5 @@
 /*
-  🎧 JUANPLAY DEVJUANCHO DEFINITIVO v6
+  🎧 JUANPLAY DEVJUANCHO DEFINITIVO v7
   Creado para DEVJUANCHO / JuanStudio
   Discord Music Bot con comandos slash, recomendaciones, yt-dlp y diseño personalizado.
 */
@@ -48,7 +48,7 @@ const VOICE_SELF_DEAF = String(process.env.VOICE_SELF_DEAF || 'true').toLowerCas
 const DEFAULT_VOLUME = Math.max(1, Math.min(200, Number(process.env.DEFAULT_VOLUME || 85))) / 100;
 const MAX_PLAYLIST_ITEMS = Math.max(1, Math.min(100, Number(process.env.MAX_PLAYLIST_ITEMS || 25)));
 const BOT_COLOR = process.env.BOT_COLOR || '#ff2f7d';
-const BRAND = 'DEVJUANCHO • JuanStudio • JUANPLAY v6';
+const BRAND = 'DEVJUANCHO • JuanStudio • JUANPLAY v7';
 const USER_AGENT = process.env.USER_AGENT || 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36';
 
 if (!TOKEN) {
@@ -125,6 +125,15 @@ function isMusicServiceThatNeedsSearch(url) {
 
 function directAudioUrl(url) {
   return /\.(mp3|m4a|wav|ogg|opus|flac|aac|webm)(\?|#|$)/i.test(url);
+}
+
+function hasModule(name) {
+  try {
+    require.resolve(name);
+    return true;
+  } catch (_) {
+    return false;
+  }
 }
 
 function youtubePlaylistUrl(url) {
@@ -881,6 +890,7 @@ async function handleDiagnostico(interaction) {
     `🤖 Bot: **${client.user.tag}**`,
     `🧩 Node: **${process.version}**`,
     `🎚️ FFmpeg: **${ffmpegPath ? 'incluido' : 'no detectado'}**`,
+    `🎙️ Opus: **${hasModule('opusscript') || hasModule('@discordjs/opus') ? 'instalado' : 'no instalado'}**`,
     `🍪 YOUTUBE_COOKIE: **${cookieFile ? 'configurada' : 'no configurada'}**`,
     `🏠 GUILD_ID: **${GUILD_ID ? GUILD_ID : 'no configurado, comandos globales'}**`,
     `🔊 Volumen: **${Math.round(q.volume * 100)}%**`,
@@ -918,7 +928,7 @@ function platformsEmbed() {
     '✅ **Spotify / Apple Music / Deezer**: toma el nombre del link y busca la canción en YouTube.',
     '✅ Muchas páginas soportadas por **yt-dlp**.',
     '',
-    '⚠️ Si YouTube tira **429**, agrega `YOUTUBE_COOKIE` nueva en Railway.',
+    '⚠️ Puede funcionar **sin cookie**. Si YouTube tira **429**, agrega `YOUTUBE_COOKIE` nueva en Railway.',
   ].join('\n'));
 }
 
@@ -930,7 +940,7 @@ function setupEmbed() {
     '**Variables Railway:**',
     '`DISCORD_TOKEN` obligatorio.',
     '`GUILD_ID` recomendado para comandos instantáneos.',
-    '`YOUTUBE_COOKIE` recomendado si YouTube bloquea con 429.',
+    '`YOUTUBE_COOKIE` opcional: solo úsala si YouTube bloquea con 429.',
     '`VOICE_TIMEOUT_MS=120000` recomendado.',
   ].join('\n'));
 }
@@ -939,7 +949,7 @@ function creditsEmbed() {
   return musicEmbed('Créditos', [
     '👑 **DEVJUANCHO**',
     '🏗️ **JuanStudio**',
-    '🎧 **JUANPLAY Music Bot Definitivo v6**',
+    '🎧 **JUANPLAY Music Bot Definitivo v7**',
     '',
     'Personalizado, decorado y optimizado para música con comandos slash.',
   ].join('\n'));
