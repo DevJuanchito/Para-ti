@@ -88,6 +88,15 @@ export const slashCommands = [
     .setDescription('Revisa el estado del bot y variables importantes.'),
 
   new SlashCommandBuilder()
+    .setName('permisos')
+    .setDescription('Revisa permisos de JUANPLAY en tu canal de voz actual.'),
+
+  new SlashCommandBuilder()
+    .setName('setup')
+    .setDescription('Muestra la guia rapida para configurar JUANPLAY en Discord y Railway.'),
+
+
+  new SlashCommandBuilder()
     .setName('creditos')
     .setDescription('Muestra los creditos DEVJUANCHO.'),
 

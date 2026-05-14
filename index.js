@@ -36,7 +36,7 @@ const BRAND_COLOR = 0x9b59ff;
 const ERROR_COLOR = 0xff315a;
 const OK_COLOR = 0x2ecc71;
 const WARN_COLOR = 0xf1c40f;
-const DIRECT_AUDIO_EXTENSIONS = ['.mp3', '.wav', '.ogg', '.opus', '.flac', '.m4a', '.aac', '.webm'];
+const DIRECT_AUDIO_EXTENSIONS = ['.mp3', '.wav', '.ogg', '.opus', '.flac', '.m4a', '.aac', '.webm', '.mp4'];
 
 const intents = [
   GatewayIntentBits.Guilds,
@@ -56,7 +56,7 @@ function startHealthServer() {
   const port = Number(process.env.PORT || 3000);
   const server = http.createServer((req, res) => {
     res.writeHead(200, { 'content-type': 'text/plain; charset=utf-8' });
-    res.end('JUANPLAY DEVJUANCHO online ✅');
+    res.end('JUANPLAY DEVJUANCHO v5 online ✅');
   });
 
   server.listen(port, '0.0.0.0', () => {
@@ -73,7 +73,7 @@ function brandEmbed(title, description, color = BRAND_COLOR) {
     .setColor(color)
     .setTitle(title)
     .setDescription(description)
-    .setFooter({ text: 'DEVJUANCHO • JuanStudio • JUANPLAY v4' })
+    .setFooter({ text: 'DEVJUANCHO • JuanStudio • JUANPLAY v5' })
     .setTimestamp();
 
   const icon = avatarUrl();
@@ -173,6 +173,30 @@ function isDeezerUrl(value) {
 function isRateLimitError(error) {
   const text = `${error?.message || ''} ${error?.statusCode || ''} ${error?.code || ''}`;
   return text.includes('429') || /too many requests/i.test(text);
+}
+
+function errorText(error) {
+  return `${error?.message || ''} ${error?.statusCode || ''} ${error?.code || ''}`.trim();
+}
+
+function getYouTubeVideoId(value) {
+  try {
+    const url = new URL(value);
+    const host = url.hostname.replace(/^www\./, '').toLowerCase();
+    if (host === 'youtu.be') return url.pathname.split('/').filter(Boolean)[0] || null;
+    if (host.endsWith('youtube.com')) {
+      if (url.searchParams.get('v')) return url.searchParams.get('v');
+      const parts = url.pathname.split('/').filter(Boolean);
+      const known = ['shorts', 'embed', 'live'];
+      if (known.includes(parts[0]) && parts[1]) return parts[1];
+    }
+  } catch {}
+  return null;
+}
+
+function isYouTubeUrl(value) {
+  const host = urlHost(value);
+  return host === 'youtu.be' || host === 'youtube.com' || host.endsWith('.youtube.com') || host === 'music.youtube.com';
 }
 
 function ytdlOptions() {
@@ -309,6 +333,45 @@ async function searchYouTube(query, requestedBy, source = 'YouTube Search') {
   return songFromSearchVideo(video, requestedBy, source);
 }
 
+async function resolveYouTubeUrl(url, requestedBy) {
+  const videoId = getYouTubeVideoId(url);
+
+  // Primero intento con yt-search por ID para NO gastar requests de ytdl antes del stream.
+  if (videoId) {
+    try {
+      const video = await ytSearch({ videoId });
+      if (video?.url || video?.title) {
+        return {
+          ...songBase(requestedBy, 'YouTube Link'),
+          title: cleanTitle(video.title || `YouTube ${videoId}`),
+          url: video.url || `https://www.youtube.com/watch?v=${videoId}`,
+          streamUrl: video.url || url,
+          duration: video.timestamp || formatDuration(video.seconds),
+          thumbnail: video.thumbnail || bestThumbnail(video.thumbnails)
+        };
+      }
+    } catch (error) {
+      console.warn('[JUANPLAY] yt-search por videoId fallo, intento ytdl info:', error.message);
+    }
+  }
+
+  try {
+    const info = await ytdl.getBasicInfo(url, infoOptions());
+    return songFromYtdlDetails(info.videoDetails, requestedBy);
+  } catch (error) {
+    console.warn('[JUANPLAY] No pude leer metadata de YouTube; usare el link directo:', errorText(error));
+    // Aunque la metadata falle por 429, dejamos que el backend de stream pruebe play-dl/ytdl.
+    return {
+      ...songBase(requestedBy, 'YouTube Link'),
+      title: videoId ? `YouTube ${videoId}` : 'Link de YouTube',
+      url: videoId ? `https://www.youtube.com/watch?v=${videoId}` : url,
+      streamUrl: url,
+      duration: 'Desconocida',
+      thumbnail: videoId ? `https://i.ytimg.com/vi/${videoId}/hqdefault.jpg` : null
+    };
+  }
+}
+
 async function topYouTubeResults(query, limit = 5) {
   const results = await ytSearch(query);
   return results.videos
@@ -379,15 +442,8 @@ async function resolveSongs(query, requestedBy) {
     }
   }
 
-  if (ytdl.validateURL(search)) {
-    try {
-      const info = await ytdl.getBasicInfo(search, infoOptions());
-      return [songFromYtdlDetails(info.videoDetails, requestedBy)];
-    } catch (error) {
-      console.error('[JUANPLAY] Error leyendo enlace de YouTube:', error);
-      if (isRateLimitError(error)) throw youtube429Error();
-      return [await searchYouTube(search, requestedBy, 'YouTube Fallback')];
-    }
+  if (isYouTubeUrl(search) || ytdl.validateURL(search)) {
+    return [await resolveYouTubeUrl(search, requestedBy)];
   }
 
   if (isSoundCloudUrl(search)) {
@@ -423,7 +479,7 @@ async function resolveSongs(query, requestedBy) {
 
 function youtube429Error() {
   return new UserError(
-    'YouTube esta bloqueando la IP de Railway con error **429**. Esta version ya trae arreglo por cookies: agrega en Railway la variable **YOUTUBE_COOKIE** con tu cookie de YouTube y redeploya. Mientras tanto prueba SoundCloud o un link directo .mp3/.m4a.'
+    'YouTube esta bloqueando la IP de Railway con error **429**. JUANPLAY v5 intenta varios backends, pero si YouTube bloquea la IP necesitas agregar **YOUTUBE_COOKIE** en Railway o usar un host/proxy con IP limpia. Mientras tanto prueba SoundCloud o un link directo `.mp3/.m4a/.wav`.'
   );
 }
 
@@ -458,7 +514,7 @@ function getState(guild) {
     player.on('error', error => {
       console.error('[JUANPLAY] Error del reproductor:', error);
       const message = isRateLimitError(error)
-        ? '🚫 YouTube mando **429**. Agrega `YOUTUBE_COOKIE` en Railway y redeploya.'
+        ? '🚫 YouTube mando **429**. Agrega `YOUTUBE_COOKIE` en Railway o prueba SoundCloud/audio directo.'
         : '⚠️ Error reproduciendo la cancion. Saltando a la siguiente...';
       sendToTextChannel(state, errorEmbed(message)).catch(() => {});
       state.current = null;
@@ -589,7 +645,7 @@ async function connectToUserVoice(context) {
     channelId: voiceChannel.id,
     guildId: context.guild.id,
     adapterCreator: voiceChannel.guild.voiceAdapterCreator,
-    selfDeaf: false,
+    selfDeaf: config.voiceSelfDeaf,
     selfMute: false
   });
 
@@ -597,6 +653,9 @@ async function connectToUserVoice(context) {
   state.isConnecting = true;
 
   connection.on('error', error => console.error('[JUANPLAY] Error de conexion de voz:', error));
+  connection.on(VoiceConnectionStatus.Signalling, () => console.log('[JUANPLAY] Voz: signalling... esperando Discord Voice Server Update'));
+  connection.on(VoiceConnectionStatus.Connecting, () => console.log('[JUANPLAY] Voz: connecting...'));
+  connection.on(VoiceConnectionStatus.Ready, () => console.log('[JUANPLAY] Voz: ready ✅'));
 
   connection.on(VoiceConnectionStatus.Disconnected, async () => {
     try {
@@ -624,6 +683,53 @@ async function connectToUserVoice(context) {
     state.isConnecting = false;
     throw new UserError(voiceConnectionErrorMessage(status));
   }
+}
+
+async function createAudioResourceFromStream(stream, streamType, song) {
+  return createAudioResource(stream, {
+    inputType: streamType ?? StreamType.Arbitrary,
+    metadata: song,
+    inlineVolume: true
+  });
+}
+
+async function createYouTubeResource(song) {
+  const url = song.streamUrl || song.url;
+  const errors = [];
+  const backend = config.streamBackend || 'auto';
+
+  if (backend === 'auto' || backend === 'playdl') {
+    try {
+      console.log(`[JUANPLAY] Stream YouTube con play-dl: ${url}`);
+      const stream = await play.stream(url, {
+        discordPlayerCompatibility: true,
+        quality: 2
+      });
+      return createAudioResourceFromStream(stream.stream, stream.type ?? StreamType.Arbitrary, song);
+    } catch (error) {
+      errors.push(`play-dl: ${errorText(error)}`);
+      console.warn('[JUANPLAY] play-dl fallo, probando ytdl:', errorText(error));
+    }
+  }
+
+  if (backend === 'auto' || backend === 'ytdl') {
+    try {
+      console.log(`[JUANPLAY] Stream YouTube con ytdl: ${url}`);
+      const stream = ytdl(url, ytdlOptions());
+      stream.on('error', error => {
+        console.error('[JUANPLAY] Error del stream de YouTube:', error);
+      });
+      return createAudioResourceFromStream(stream, StreamType.Arbitrary, song);
+    } catch (error) {
+      errors.push(`ytdl: ${errorText(error)}`);
+      console.warn('[JUANPLAY] ytdl fallo:', errorText(error));
+    }
+  }
+
+  const combined = errors.join(' | ');
+  const finalError = new Error(combined || 'No se pudo crear stream de YouTube');
+  if (combined.includes('429')) finalError.statusCode = 429;
+  throw finalError;
 }
 
 async function createResourceForSong(song) {
@@ -656,16 +762,7 @@ async function createResourceForSong(song) {
     });
   }
 
-  const stream = ytdl(song.streamUrl || song.url, ytdlOptions());
-  stream.on('error', error => {
-    console.error('[JUANPLAY] Error del stream de YouTube:', error);
-  });
-
-  return createAudioResource(stream, {
-    inputType: StreamType.Arbitrary,
-    metadata: song,
-    inlineVolume: true
-  });
+  return createYouTubeResource(song);
 }
 
 async function playNext(guildId) {
@@ -703,7 +800,7 @@ async function playNext(guildId) {
   } catch (error) {
     console.error('[JUANPLAY] No pude reproducir:', error);
     const msg = isRateLimitError(error)
-      ? 'YouTube bloqueo el stream con **429**. Agrega `YOUTUBE_COOKIE` en Railway y redeploya.'
+      ? 'YouTube bloqueo el stream con **429**. Agrega `YOUTUBE_COOKIE` en Railway o usa un host/proxy con IP limpia. También puedes probar SoundCloud o audio directo `.mp3/.m4a`.'
       : `No pude reproducir **${next.title}**. Saltando a la siguiente...`;
     await sendToTextChannel(state, errorEmbed(msg));
     state.current = null;
@@ -741,7 +838,7 @@ async function commandHelp(context) {
     : '';
 
   const embed = brandEmbed(
-    '💿 JUANPLAY DEVJUANCHO • Comandos',
+    '💿 JUANPLAY DEVJUANCHO v5 • Comandos',
     [
       '🎵 `/juanplay busqueda` - reproduce por nombre o link.',
       '🎵 `/play busqueda` - igual que `/juanplay`.',
@@ -757,6 +854,8 @@ async function commandHelp(context) {
       '👋 `/leave` - sale del canal.',
       '🌐 `/plataformas` - plataformas soportadas.',
       '🛠️ `/diagnostico` - revisa configuración.',
+      '🔐 `/permisos` - revisa permisos de voz.',
+      '⚙️ `/setup` - guía de instalación.',
       '👑 `/creditos` - DEVJUANCHO.',
       prefixLine
     ].filter(Boolean).join('\n'),
@@ -914,14 +1013,15 @@ async function commandPlatforms(context) {
   const embed = brandEmbed(
     '🌐 Plataformas JUANPLAY',
     [
-      '✅ **YouTube**: links, nombres y playlists.',
+      '✅ **YouTube**: links, nombres y playlists. v5 prueba play-dl + ytdl automáticamente.',
       '✅ **SoundCloud**: links directos y fallback por búsqueda.',
-      '✅ **Spotify**: lee metadata y busca la canción para reproducirla.',
-      '✅ **Apple Music**: lee metadata y busca la canción para reproducirla.',
-      '✅ **Deezer**: lee metadata y busca la canción para reproducirla.',
+      '✅ **Spotify**: links de track/album/playlist por metadata → búsqueda reproducible.',
+      '✅ **Apple Music**: links por metadata → búsqueda reproducible.',
+      '✅ **Deezer**: links por metadata → búsqueda reproducible.',
       '✅ **Audio directo**: `.mp3`, `.wav`, `.ogg`, `.opus`, `.flac`, `.m4a`, `.aac`, `.webm`.',
       '',
-      '⚠️ Spotify/Apple/Deezer no entregan audio completo para bots; JUANPLAY convierte esos links a búsqueda reproducible.'
+      '⚠️ Spotify/Apple/Deezer no entregan audio completo para bots; JUANPLAY convierte esos links a búsqueda reproducible.',
+      '⚠️ Si Railway recibe 429 de YouTube, usa `YOUTUBE_COOKIE` o prueba SoundCloud/audio directo.'
     ].join('\n'),
     BRAND_COLOR
   );
@@ -940,9 +1040,67 @@ async function commandDiagnostico(context) {
       { name: '📜 Cola', value: String(state?.songs?.length || 0), inline: true },
       { name: '🔊 Volumen', value: `${Math.round((state?.volume ?? config.defaultVolume / 100) * 100)}%`, inline: true },
       { name: '🍪 YOUTUBE_COOKIE', value: config.youtubeCookie ? 'Configurada ✅' : 'No configurada ⚠️', inline: true },
-      { name: '🆔 GUILD_ID', value: config.guildId ? 'Configurado ✅' : 'No configurado ⚠️', inline: true }
+      { name: '🆔 GUILD_ID', value: config.guildId ? 'Configurado ✅' : 'No configurado ⚠️', inline: true },
+      { name: '🎚️ STREAM_BACKEND', value: config.streamBackend || 'auto', inline: true },
+      { name: '🔇 VOICE_SELF_DEAF', value: config.voiceSelfDeaf ? 'true ✅' : 'false', inline: true },
+      { name: '👑 Versión', value: config.botVersion || 'v5', inline: true }
     );
 
+  await safeReply(context, { embeds: [embed] });
+}
+
+async function commandPermisos(context) {
+  await safeDefer(context);
+  const member = await getGuildMember(context);
+  const voiceChannel = member?.voice?.channel;
+
+  if (!voiceChannel) {
+    throw new UserError('Entra primero a un canal de voz y usa `/permisos`.');
+  }
+
+  const me = await voiceChannel.guild.members.fetchMe();
+  const perms = voiceChannel.permissionsFor(me);
+  const checks = [
+    ['Ver canales', PermissionFlagsBits.ViewChannel],
+    ['Conectarse', PermissionFlagsBits.Connect],
+    ['Hablar', PermissionFlagsBits.Speak],
+    ['Usar actividad de voz', PermissionFlagsBits.UseVAD],
+    ['Usar sonidos externos', PermissionFlagsBits.UseExternalSounds]
+  ];
+
+  const lines = checks.map(([name, flag]) => `${perms?.has(flag) ? '✅' : '❌'} **${name}**`).join('\n');
+  const embed = brandEmbed(
+    '🔐 Permisos de JUANPLAY',
+    `Canal: **${voiceChannel.name}**\nTipo: **${voiceChannel.type === ChannelType.GuildStageVoice ? 'Stage/Escenario ⚠️' : 'Voz normal ✅'}**\n\n${lines}\n\nSi sale ❌ en Ver canales/Conectarse/Hablar, dale esos permisos al rol del bot en ese canal.`,
+    perms?.has(PermissionFlagsBits.ViewChannel) && perms?.has(PermissionFlagsBits.Connect) && perms?.has(PermissionFlagsBits.Speak) ? OK_COLOR : WARN_COLOR
+  );
+
+  await safeReply(context, { embeds: [embed] });
+}
+
+async function commandSetup(context) {
+  const embed = brandEmbed(
+    '⚙️ Setup JUANPLAY DEVJUANCHO v5',
+    [
+      '**Railway Variables:**',
+      '`DISCORD_TOKEN=tu_token`',
+      '`GUILD_ID=id_de_tu_servidor`',
+      '`YOUTUBE_COOKIE=opcional_para_error_429`',
+      '`STREAM_BACKEND=auto`',
+      '',
+      '**Discord Developer Portal → OAuth2:**',
+      'Scopes: `bot` + `applications.commands`',
+      'Permisos: Ver canales, Enviar mensajes, Leer historial, Usar comandos de barra diagonal, Conectarse, Hablar.',
+      '',
+      '**Pruebas:**',
+      '`/permisos` → revisa permisos del canal',
+      '`/testvoz` → prueba conexión de voz',
+      '`/juanplay nombre o link` → reproduce música',
+      '',
+      '⚠️ Si queda en **signalling**, casi siempre es permiso de canal/region/host. Si YouTube da **429**, es bloqueo de IP y se arregla con `YOUTUBE_COOKIE` o IP limpia.'
+    ].join('\n'),
+    BRAND_COLOR
+  );
   await safeReply(context, { embeds: [embed] });
 }
 
@@ -1028,6 +1186,12 @@ async function runCommand(context, commandName, args = []) {
       case 'diagnóstico':
       case 'diag':
         return await commandDiagnostico(context);
+      case 'permisos':
+      case 'perms':
+        return await commandPermisos(context);
+      case 'setup':
+      case 'configurar':
+        return await commandSetup(context);
       case 'creditos':
       case 'créditos':
       case 'credits':
@@ -1067,12 +1231,12 @@ async function registerSlashCommands() {
 }
 
 client.once(Events.ClientReady, async readyClient => {
-  console.log(`✅ JUANPLAY DEVJUANCHO conectado como ${readyClient.user.tag}`);
+  console.log(`✅ JUANPLAY DEVJUANCHO v5 conectado como ${readyClient.user.tag}`);
   console.log(`🔗 ID de la app/bot: ${readyClient.user.id}`);
   console.log('🎵 Usa /help, /plataformas, /testvoz o /juanplay en Discord.');
 
   readyClient.user.setPresence({
-    activities: [{ name: 'JUANPLAY • DEVJUANCHO', type: ActivityType.Listening }],
+    activities: [{ name: 'JUANPLAY v5 • DEVJUANCHO', type: ActivityType.Listening }],
     status: 'online'
   });
 

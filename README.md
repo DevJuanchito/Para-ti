@@ -1,41 +1,60 @@
-# JUANPLAY DEVJUANCHO v4
+# JUANPLAY DEVJUANCHO v5
 
-Bot de música para Discord personalizado para **DEVJUANCHO / JuanStudio**.
+Bot de música personalizado para Discord, decorado al estilo **JUANPLAY / DEVJUANCHO / JuanStudio**.
 
 ## Comandos
 
-- `/juanplay busqueda` - reproduce por nombre o link.
-- `/play busqueda` - igual que `/juanplay`.
-- `/buscar busqueda` - muestra resultados antes de reproducir.
-- `/testvoz` - prueba conexión al canal de voz.
-- `/queue` - muestra la cola.
-- `/nowplaying` - canción actual.
-- `/skip`, `/pause`, `/resume`, `/stop`, `/leave`.
-- `/volume nivel` - cambia volumen de 1 a 150.
-- `/plataformas` - muestra plataformas soportadas.
-- `/diagnostico` - revisa variables y estado.
-- `/creditos` - créditos DEVJUANCHO.
+- `/juanplay busqueda`
+- `/play busqueda`
+- `/buscar busqueda`
+- `/plataformas`
+- `/permisos`
+- `/testvoz`
+- `/diagnostico`
+- `/setup`
+- `/skip`
+- `/stop`
+- `/pause`
+- `/resume`
+- `/queue`
+- `/nowplaying`
+- `/volume nivel`
+- `/leave`
+- `/creditos`
+- `/ping`
 
-## Variables para Railway
+## Plataformas
 
-Obligatorias:
+- YouTube links, nombres y playlists.
+- SoundCloud links.
+- Spotify / Apple Music / Deezer links por metadata: JUANPLAY busca la canción reproducible.
+- Audio directo: `.mp3`, `.m4a`, `.wav`, `.ogg`, `.opus`, `.flac`, `.aac`, `.webm`, `.mp4`.
+
+## Variables en Railway
 
 ```env
 DISCORD_TOKEN=TU_TOKEN_DEL_BOT
 GUILD_ID=ID_DE_TU_SERVIDOR
+YOUTUBE_COOKIE=OPCIONAL_PARA_ERROR_429
+STREAM_BACKEND=auto
+VOICE_TIMEOUT_MS=120000
+VOICE_SELF_DEAF=true
 ```
 
-Muy recomendado si YouTube da error `Status code: 429` en Railway:
+## Importante sobre YouTube 429
 
-```env
-YOUTUBE_COOKIE=SID=...; HSID=...; SSID=...; APISID=...; SAPISID=...;
-```
+Si Railway muestra `Status code: 429`, YouTube está bloqueando la IP del host. El bot ya prueba varios backends, pero si la IP está bloqueada necesitas `YOUTUBE_COOKIE`, una IP limpia/proxy, o probar SoundCloud/audio directo.
 
-Ese error 429 no es del código: YouTube está bloqueando o limitando la IP del hosting. Esta versión acepta cookies para reducir ese bloqueo.
+## Importante sobre voz / signalling
 
-## Invitar bot
+Si `/testvoz` queda en `signalling`, revisa:
 
-En Discord Developer Portal > OAuth2 > URL Generator marca:
+1. El bot tiene permisos en ese canal: **Ver canales**, **Conectarse**, **Hablar**.
+2. El canal es voz normal, no Stage/Escenario.
+3. La región del canal está en Automático.
+4. Si el host no permite Discord Voice/UDP, usa un host/VPS que sí lo permita.
+
+## OAuth2
 
 Scopes:
 
@@ -44,24 +63,18 @@ bot
 applications.commands
 ```
 
-Permisos:
+Permisos mínimos:
 
 ```txt
 Ver canales
 Enviar mensajes
-Insertar enlaces
 Leer historial de mensajes
 Usar comandos de barra diagonal
 Conectarse
 Hablar
+Insertar enlaces
+Añadir reacciones
 Usar sonidos externos
 ```
 
-## Plataformas
-
-- YouTube: links, búsquedas por nombre y playlists.
-- SoundCloud: links directos; si falla, busca por nombre.
-- Spotify / Apple Music / Deezer: lee metadata pública cuando puede y busca la canción para reproducirla.
-- Links directos de audio: mp3, wav, ogg, opus, flac, m4a, webm.
-
-Nota: Spotify, Apple Music y Deezer no entregan audio completo para bots por DRM/licencias; el bot los convierte a búsqueda reproducible.
+Créditos: **DEVJUANCHO • JuanStudio**

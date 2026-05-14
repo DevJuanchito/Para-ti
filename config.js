@@ -49,12 +49,15 @@ export const config = {
   enablePrefixCommands: asBoolean(getValue(localConfig, 'ENABLE_PREFIX_COMMANDS'), false),
   maxPlaylistSongs: asNumber(getValue(localConfig, 'MAX_PLAYLIST_SONGS'), 25, 1, 100),
   staySeconds: asNumber(getValue(localConfig, 'STAY_SECONDS'), 120, 10, 900),
-  voiceTimeoutMs: asNumber(getValue(localConfig, 'VOICE_TIMEOUT_MS'), 60_000, 10_000, 180_000),
+  voiceTimeoutMs: asNumber(getValue(localConfig, 'VOICE_TIMEOUT_MS'), 120_000, 10_000, 180_000),
   defaultVolume: asNumber(getValue(localConfig, 'DEFAULT_VOLUME'), 85, 1, 150),
+  streamBackend: (getValue(localConfig, 'STREAM_BACKEND') || 'auto').toLowerCase(),
+  voiceSelfDeaf: asBoolean(getValue(localConfig, 'VOICE_SELF_DEAF'), true),
   youtubeCookie: getValue(localConfig, 'YOUTUBE_COOKIE', 'YOUTUBE_COOKIES'),
   youtubeUserAgent:
     getValue(localConfig, 'YOUTUBE_USER_AGENT') ||
-    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36'
+    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36',
+  botVersion: 'v5.0 DEVJUANCHO'
 };
 
 export function requireToken() {
