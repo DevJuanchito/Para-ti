@@ -1,12 +1,14 @@
 NOMBRE RECOMENDADO:
 JUANPLAY
 
-DESCRIPCION / ABOUT ME:
-🎵 JUANPLAY — música con comandos slash, búsqueda, cola, recomendados privados y panel limpio para servidores públicos.
-Desarrollador único: DEVJUANCHO.
-Usa /play, /buscar, /recomendados y /help.
+DESCRIPCIÓN / ABOUT ME:
+🎧 JUANPLAY — Bot de música público para servidores de Discord.
 
-ACTIVIDAD:
-El código cambia la actividad automáticamente.
-- En espera: JUANPLAY • /play • DEVJUANCHO
-- Reproduciendo: aparece el nombre de la canción actual.
+Busca canciones por nombre o link, reproduce música, muestra panel limpio, cola privada, controles con botones y recomendaciones privadas sin spamear el canal.
+
+👑 Desarrollador único: DEVJUANCHO
+🎵 Comandos principales: /play, /juanplay, /buscar, /recomendados, /queue, /nowplaying
+🔥 Sistema personalizado, decorado y optimizado para la comunidad.
+
+ESTADO / ACTIVIDAD:
+El bot cambia automáticamente su actividad cuando reproduce música y muestra la canción actual.

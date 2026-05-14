@@ -38,7 +38,7 @@ const CONFIG = {
   emoji: process.env.DEFAULT_EMOJI || '🐵',
   developer: process.env.DEVELOPER_NAME || 'DEVJUANCHO',
   brand: process.env.BOT_BRAND || 'JUANPLAY',
-  version: '10.0.0',
+  version: '11.0.0',
   defaultVolume: clamp(Number(process.env.DEFAULT_VOLUME || 85), 1, 150),
   voiceTimeoutMs: Number(process.env.VOICE_TIMEOUT_MS || 120000),
   selfDeaf: String(process.env.VOICE_SELF_DEAF || 'true').toLowerCase() !== 'false',
@@ -53,6 +53,10 @@ const CONFIG = {
   ffmpegPath: process.env.FFMPEG_PATH || ffmpegStatic || 'ffmpeg',
   ytdlpPath: process.env.YTDLP_PATH || 'yt-dlp'
 };
+
+if (CONFIG.ffmpegPath) {
+  process.env.FFMPEG_PATH = CONFIG.ffmpegPath;
+}
 
 if (!CONFIG.token) {
   throw new Error('Falta DISCORD_TOKEN en Railway. Agrega DISCORD_TOKEN=TU_TOKEN_DEL_BOT');
@@ -172,6 +176,7 @@ function getState(guildId) {
     player.on('error', (error) => {
       console.error('[JUANPLAY] Error del reproductor:', error);
       state.lastError = error?.message || String(error);
+      state.current = null;
       if (state.cleanup) {
         state.cleanup();
         state.cleanup = null;
@@ -461,53 +466,62 @@ async function connectToVoice(interaction) {
 
 function createAudioPipeline(track, state) {
   const children = [];
-  let ytdlp = null;
-  let ffmpeg = null;
+
+  const commonAudioArgs = [
+    ...ytDlpBaseArgs(),
+    '-f', 'bestaudio[ext=webm][acodec=opus]/bestaudio[acodec=opus]/bestaudio[ext=webm]/bestaudio/best',
+    '-o', '-',
+    '--no-playlist',
+    '--quiet',
+    '--no-progress',
+    track.url
+  ];
+
+  // Audio principal: mismo estilo estable que funcionaba en v7.
+  // Mandamos el stream de yt-dlp directo a Discord Voice y dejamos que @discordjs/voice lo procese.
+  // Esto evita el fallo de silencio de la v10 causado por el pipeline PCM/Raw en algunos hosts.
+  let main = null;
+  let resourceStream = null;
 
   if (isDirectAudioUrl(track.url)) {
-    ffmpeg = spawn(CONFIG.ffmpegPath, [
-      '-hide_banner', '-loglevel', 'error',
+    // Para links mp3/m4a/wav directos usamos FFmpeg como entrada HTTP y salida s16le.
+    main = spawn(CONFIG.ffmpegPath, [
+      '-hide_banner', '-loglevel', 'warning',
       '-reconnect', '1', '-reconnect_streamed', '1', '-reconnect_delay_max', '5',
       '-i', track.url,
       '-vn', '-f', 's16le', '-ar', '48000', '-ac', '2', 'pipe:1'
     ], { stdio: ['ignore', 'pipe', 'pipe'] });
-    children.push(ffmpeg);
+    resourceStream = main.stdout;
+    children.push(main);
   } else {
-    ytdlp = spawn(CONFIG.ytdlpPath, [
-      ...ytDlpBaseArgs(),
-      '-f', 'bestaudio/best',
-      '-o', '-',
-      '--no-playlist',
-      '--quiet',
-      track.url
-    ], { stdio: ['ignore', 'pipe', 'pipe'] });
-
-    ffmpeg = spawn(CONFIG.ffmpegPath, [
-      '-hide_banner', '-loglevel', 'error',
-      '-i', 'pipe:0',
-      '-vn', '-f', 's16le', '-ar', '48000', '-ac', '2', 'pipe:1'
-    ], { stdio: ['pipe', 'pipe', 'pipe'] });
-
-    ytdlp.stdout.pipe(ffmpeg.stdin);
-    children.push(ytdlp, ffmpeg);
+    main = spawn(CONFIG.ytdlpPath, commonAudioArgs, { stdio: ['ignore', 'pipe', 'pipe'] });
+    resourceStream = main.stdout;
+    children.push(main);
   }
 
   for (const child of children) {
     pendingProcesses.add(child);
-    child.on('close', () => pendingProcesses.delete(child));
+    child.on('close', (code, signal) => {
+      pendingProcesses.delete(child);
+      if (code && code !== 0 && signal !== 'SIGKILL') {
+        console.warn(`[JUANPLAY audio] Proceso cerrado: code=${code} signal=${signal}`);
+      }
+    });
     child.on('error', (err) => {
       console.error('[JUANPLAY] Proceso de audio falló:', err?.message || err);
+      state.lastError = err?.message || String(err);
     });
     child.stderr?.on('data', (chunk) => {
       const msg = chunk.toString().trim();
-      if (msg && !/Broken pipe|Immediate exit requested/i.test(msg)) {
-        console.warn('[JUANPLAY audio]', cut(msg, 500));
+      if (msg && !/Broken pipe|Immediate exit requested|Deleting original file/i.test(msg)) {
+        console.warn('[JUANPLAY audio]', cut(msg, 700));
+        if (/429|Too Many Requests|Sign in to confirm|cookies|bot/i.test(msg)) state.lastError = msg;
       }
     });
   }
 
-  const resource = createAudioResource(ffmpeg.stdout, {
-    inputType: StreamType.Raw,
+  const resource = createAudioResource(resourceStream, {
+    inputType: isDirectAudioUrl(track.url) ? StreamType.Raw : StreamType.Arbitrary,
     inlineVolume: true,
     metadata: track
   });
@@ -560,7 +574,7 @@ async function playNext(guildId) {
 function nowPlayingEmbed(state) {
   const t = state.current;
   if (!t) return baseEmbed('JUANPLAY está listo', 'Usa `/play` o `/juanplay` para poner música.');
-  const embed = baseEmbed('JUANPLAY está sonando',
+  const embed = baseEmbed('JUANPLAY está sonando ahora',
     `### [${cut(t.title, 90)}](${t.webpageUrl || t.url})\n` +
     `**Pedido por:** <@${t.requestedById}>\n` +
     `**Canal / fuente:** ${t.source}\n` +
@@ -630,7 +644,7 @@ async function updatePanel(state, mode = 'playing', detail = '') {
     embed = baseEmbed('JUANPLAY tuvo un problema de audio',
       `Voy a intentar seguir con la siguiente canción.\n\n` +
       `**Detalle corto:** ${cut(detail || 'Error desconocido', 250)}\n` +
-      `**Tip:** Usa /diagnostico para revisar FFmpeg, yt-dlp y Opus.`
+      `**Tip:** Usa /diagnostico. Este v11 usa el audio estable de v7 + panel público de v10.`
     );
   } else {
     embed = baseEmbed('JUANPLAY', 'Panel actualizado.');
@@ -1046,7 +1060,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
       return interaction.reply({ embeds: [baseEmbed('Perfil oficial de JUANPLAY', desc)], ephemeral: true });
     }
     if (commandName === 'creditos') {
-      return interaction.reply({ embeds: [baseEmbed('Créditos oficiales', `**${CONFIG.brand}**\nDesarrollador único: **${CONFIG.developer}**\nSistema de música, recomendaciones privadas, panel público limpio y actividad dinámica.`)], ephemeral: true });
+      return interaction.reply({ embeds: [baseEmbed('Créditos oficiales', `**${CONFIG.brand}**\nDesarrollador único: **${CONFIG.developer}**\nSistema público de música: audio corregido, recomendaciones privadas, panel limpio y actividad dinámica.`)], ephemeral: true });
     }
     if (commandName === 'help') {
       const desc = `**Música**\n` +

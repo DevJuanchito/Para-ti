@@ -1,7 +1,7 @@
 {
   "name": "juanplay-devjuancho-publico",
-  "version": "10.0.0",
-  "description": "JUANPLAY - Bot de música decorado para servidores públicos. Desarrollador: DEVJUANCHO.",
+  "version": "11.0.0",
+  "description": "JUANPLAY - Bot de música público decorado, sin spam, con audio estable v7, actividad dinámica y créditos DEVJUANCHO.",
   "main": "index.js",
   "type": "module",
   "scripts": {
