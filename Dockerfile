@@ -1,4 +1,4 @@
-FROM node:22-bookworm-slim
+FROM node:20-bookworm-slim
 
 WORKDIR /app
 
@@ -9,8 +9,10 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/*
 
 COPY package*.json ./
-RUN npm install --omit=dev
+COPY .npmrc ./
+RUN npm install --omit=dev --legacy-peer-deps
 
 COPY . .
 
+ENV NODE_ENV=production
 CMD ["npm", "start"]

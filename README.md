@@ -1,8 +1,8 @@
-# 🎧 JUANPLAY DEVJUANCHO PÚBLICO v12
+# 🎧 JUANPLAY DEVJUANCHO PÚBLICO v13
 
 Bot de música listo para servidor público. Desarrollador único: **DEVJUANCHO**.
 
-## ✅ Arreglos de v12
+## ✅ Arreglos de v13
 
 - Audio mantenido con el sistema estable de v7 para que vuelva a sonar.
 - Agregado `/testaudio` para comprobar con un tono real si Discord está escuchando audio.

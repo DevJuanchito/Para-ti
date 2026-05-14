@@ -39,7 +39,7 @@ const CONFIG = {
   emoji: process.env.DEFAULT_EMOJI || '🐵',
   developer: process.env.DEVELOPER_NAME || 'DEVJUANCHO',
   brand: process.env.BOT_BRAND || 'JUANPLAY',
-  version: '12.0.0',
+  version: '13.0.0',
   defaultVolume: clamp(Number(process.env.DEFAULT_VOLUME || 85), 1, 150),
   voiceTimeoutMs: Number(process.env.VOICE_TIMEOUT_MS || 120000),
   selfDeaf: String(process.env.VOICE_SELF_DEAF || 'true').toLowerCase() !== 'false',
@@ -648,7 +648,7 @@ async function updatePanel(state, mode = 'playing', detail = '') {
     embed = baseEmbed('JUANPLAY tuvo un problema de audio',
       `Voy a intentar seguir con la siguiente canción.\n\n` +
       `**Detalle corto:** ${cut(detail || 'Error desconocido', 250)}\n` +
-      `**Tip:** Usa /diagnostico. Este v12 usa el audio estable de v7 + panel público sin spam.`
+      `**Tip:** Usa /diagnostico. Este v13 usa el audio estable de v7 + panel público sin spam + instalación corregida.`
     );
   } else {
     embed = baseEmbed('JUANPLAY', 'Panel actualizado.');
