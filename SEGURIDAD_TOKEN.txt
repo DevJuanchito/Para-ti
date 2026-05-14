@@ -1,0 +1,13 @@
+SEGURIDAD DEL TOKEN
+
+Tu token de Discord es como una contrasena.
+No lo publiques en GitHub, Discord, YouTube, capturas de pantalla ni mensajes.
+
+Si tu token se filtra:
+1. Ve a Discord Developer Portal.
+2. Entra a tu aplicacion.
+3. Ve a Bot.
+4. Presiona Reset Token.
+5. Actualiza el token en tu PC o hosting.
+
+En GitHub debes subir config.example.json, pero NO config.json con tu token real.
