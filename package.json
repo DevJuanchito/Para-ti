@@ -1,7 +1,7 @@
 {
-  "name": "juanplay-devjuancho-definitivo-v7",
-  "version": "7.0.0",
-  "description": "JUANPLAY Music Bot definitivo v7 por DEVJUANCHO / JuanStudio. Arreglado Opus, YouTube links/nombres, recomendaciones, yt-dlp y modo sin cookie.",
+  "name": "juanplay-devjuancho-publico-v8",
+  "version": "8.0.0",
+  "description": "JUANPLAY Music Bot público v8 por DEVJUANCHO / JuanStudio. Actividad dinámica, cola completa paginada, botones, anti-spam, yt-dlp y diseño premium.",
   "main": "index.js",
   "type": "commonjs",
   "scripts": {
@@ -16,9 +16,9 @@
     "discord.js": "latest",
     "ffmpeg-static": "latest",
     "libsodium-wrappers": "latest",
+    "opusscript": "latest",
     "prism-media": "latest",
     "youtube-dl-exec": "latest",
-    "yt-search": "latest",
-    "opusscript": "latest"
+    "yt-search": "latest"
   }
 }
