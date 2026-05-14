@@ -18,7 +18,9 @@ const {
   ButtonStyle,
   Client,
   EmbedBuilder,
+  Events,
   GatewayIntentBits,
+  MessageFlags,
   PermissionFlagsBits,
   REST,
   Routes,
@@ -36,7 +38,7 @@ const {
   joinVoiceChannel,
 } = require('@discordjs/voice');
 
-const BOT_VERSION = '1.0.0-railway-devjuancho';
+const BOT_VERSION = '1.0.1-railway-fix-interacciones';
 const COLORS = {
   ok: 0x57f287,
   warn: 0xffcc4d,
@@ -260,16 +262,35 @@ async function youtubeSearch(query, count = 1) {
 }
 
 async function autocompleteSearch(query) {
-  if (!query || query.trim().length < 2) return [];
-  try {
-    const results = await youtubeSearch(query, 8);
-    return results.map((track) => ({
-      name: trimText(`${track.title} · ${track.platform}`, 90),
-      value: track.title.slice(0, 100),
-    })).slice(0, 25);
-  } catch {
-    return [];
-  }
+  // IMPORTANTE: el autocomplete de Discord debe responder en menos de 3 segundos.
+  // No usamos yt-dlp aquí para evitar que el comando se quede "pensando" cuando Railway/YouTube tarda.
+  const base = String(query || '').replace(/\s+/g, ' ').trim();
+  if (base.length < 2) return [];
+
+  const suggestions = [
+    base,
+    `${base} official video`,
+    `${base} official audio`,
+    `${base} lyrics`,
+    `${base} remix`,
+    `${base} live`,
+    `${base} slowed`,
+    `${base} instrumental`,
+  ];
+
+  const seen = new Set();
+  return suggestions
+    .filter((item) => {
+      const key = item.toLowerCase();
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    })
+    .slice(0, 25)
+    .map((item) => ({
+      name: trimText(`🔎 ${item}`, 90),
+      value: item.slice(0, 100),
+    }));
 }
 
 function normalizeUrl(entry) {
@@ -786,11 +807,49 @@ function isOnCooldown(interaction) {
   return false;
 }
 
+function clonePayload(payload) {
+  return typeof payload === 'string' ? { content: payload } : { ...(payload || {}) };
+}
+
+function addEphemeralFlag(payload, ephemeral) {
+  const finalPayload = clonePayload(payload);
+  delete finalPayload.ephemeral; // discord.js v14 depreca "ephemeral"; usar flags evita warnings.
+  if (ephemeral) finalPayload.flags = MessageFlags.Ephemeral;
+  return finalPayload;
+}
+
+function stripInitialOnlyFlags(payload) {
+  const finalPayload = clonePayload(payload);
+  delete finalPayload.ephemeral;
+  delete finalPayload.flags; // editReply no puede cambiar si es privado; eso se define en defer/reply.
+  return finalPayload;
+}
+
+async function deferSmart(interaction, ephemeral = CONFIG.PRIVATE_COMMAND_RESPONSES) {
+  if (interaction.deferred || interaction.replied) return true;
+  const payload = ephemeral ? { flags: MessageFlags.Ephemeral } : {};
+  await interaction.deferReply(payload);
+  return true;
+}
+
 async function replySmart(interaction, payload, ephemeral = CONFIG.PRIVATE_COMMAND_RESPONSES) {
-  const finalPayload = typeof payload === 'string' ? { content: payload } : payload;
-  if (ephemeral && finalPayload.ephemeral === undefined) finalPayload.ephemeral = true;
-  if (interaction.deferred || interaction.replied) return interaction.editReply(finalPayload).catch(() => {});
-  return interaction.reply(finalPayload).catch(() => {});
+  try {
+    if (interaction.deferred) {
+      return await interaction.editReply(stripInitialOnlyFlags(payload));
+    }
+    if (interaction.replied) {
+      return await interaction.followUp(addEphemeralFlag(payload, ephemeral));
+    }
+    return await interaction.reply(addEphemeralFlag(payload, ephemeral));
+  } catch (error) {
+    console.error('[JUANPLAY] No pude responder interacción:', error?.message || error);
+    return null;
+  }
+}
+
+async function loadingReply(interaction, title, description, ephemeral = true) {
+  await deferSmart(interaction, ephemeral);
+  await interaction.editReply({ embeds: [makeEmbed(title, description, CONFIG.BOT_COLOR)] }).catch(() => {});
 }
 
 async function errorReply(interaction, error) {
@@ -801,7 +860,7 @@ async function errorReply(interaction, error) {
 
 async function handlePlayCommand(interaction) {
   const query = interaction.options.getString('cancion', true);
-  await interaction.deferReply({ ephemeral: CONFIG.PRIVATE_COMMAND_RESPONSES });
+  await loadingReply(interaction, '🔎 Buscando canción', `Estoy buscando **${trimText(query, 120)}** y preparando el canal de voz...`, CONFIG.PRIVATE_COMMAND_RESPONSES);
   const state = getState(interaction.guild.id);
   state.lastTextChannelId = interaction.channelId;
   await ensureVoiceConnection(interaction);
@@ -824,7 +883,7 @@ async function handlePlayCommand(interaction) {
 
 async function handleSearchCommand(interaction) {
   const query = interaction.options.getString('cancion', true);
-  await interaction.deferReply({ ephemeral: true });
+  await loadingReply(interaction, '🔎 Buscando resultados', `Buscando **${trimText(query, 120)}**...`, true);
   const results = await youtubeSearch(query, 5);
   if (!results.length) throw new Error('No encontré resultados para esa búsqueda.');
   const id = createSession(results.map((track) => attachRequester(track, interaction)), interaction.user.id, 'search');
@@ -849,7 +908,7 @@ async function makeRecommendations(seedText, count = CONFIG.RECOMMENDATION_COUNT
 }
 
 async function handleRecommendationsCommand(interaction, similarMode = false) {
-  await interaction.deferReply({ ephemeral: true });
+  await loadingReply(interaction, '✨ Preparando recomendaciones', 'Buscando canciones parecidas sin spamear el canal...', true);
   const state = getState(interaction.guild.id);
   const typed = interaction.options?.getString('cancion', false);
   const seed = typed || state.current?.title || state.recommendationSeed?.title;
@@ -954,7 +1013,7 @@ async function handleLeave(interaction) {
 }
 
 async function handleTestVoice(interaction) {
-  await interaction.deferReply({ ephemeral: true });
+  await loadingReply(interaction, '🔊 Probando voz', 'Intentando conectarme al canal de voz...', true);
   await ensureVoiceConnection(interaction);
   const state = getState(interaction.guild.id);
   state.lastTextChannelId = interaction.channelId;
@@ -962,7 +1021,7 @@ async function handleTestVoice(interaction) {
 }
 
 async function handleTestAudio(interaction) {
-  await interaction.deferReply({ ephemeral: true });
+  await loadingReply(interaction, '🔊 Probando audio', 'Preparando tono de prueba...', true);
   const state = getState(interaction.guild.id);
   if (state.current) throw new Error('Hay música sonando ahora. Para no interrumpir a todos, usa /pause o /stop antes de /testaudio.');
   state.lastTextChannelId = interaction.channelId;
@@ -981,7 +1040,7 @@ function checkBinary(binary, arg = '-version') {
 }
 
 async function handleDiagnostic(interaction) {
-  await interaction.deferReply({ ephemeral: true });
+  await loadingReply(interaction, '🧪 Ejecutando diagnóstico', 'Revisando Railway, binarios, permisos y voz...', true);
   const state = getState(interaction.guild.id);
   const ffmpeg = checkBinary(CONFIG.FFMPEG_BIN, '-version');
   const ytdlp = checkBinary(CONFIG.YTDLP_BIN, '--version');
@@ -1095,7 +1154,7 @@ async function handleButton(interaction) {
   if (interaction.customId === 'jp_stop') return handleStop(interaction);
   if (interaction.customId === 'jp_queue') return handleQueueCommand(interaction);
   if (interaction.customId === 'jp_rec') {
-    await interaction.deferReply({ ephemeral: true });
+    await loadingReply(interaction, '✨ Recomendados privados', 'Preparando recomendaciones para ti...', true);
     const seed = state.current?.title || state.recommendationSeed?.title;
     if (!seed) throw new Error('Todavía no tengo una canción base para recomendar.');
     const results = (await makeRecommendations(seed)).map((track) => attachRequester(track, interaction));
@@ -1111,7 +1170,7 @@ async function handleButton(interaction) {
   const track = session.tracks[index];
   if (!track) throw new Error('No encontré esa opción.');
 
-  await interaction.deferReply({ ephemeral: true });
+  await loadingReply(interaction, '✅ Agregando canción', 'Conectando al canal de voz y agregando la canción seleccionada...', true);
   await ensureVoiceConnection(interaction);
   const enriched = attachRequester(track, interaction);
   const accepted = enqueueTracks(state, [enriched]);
@@ -1120,7 +1179,7 @@ async function handleButton(interaction) {
   else await refreshPanelByState(state, 'playing');
 }
 
-client.once('ready', async () => {
+client.once(Events.ClientReady, async () => {
   console.log(`[JUANPLAY] Conectado como ${client.user.tag}.`);
   await setPresenceStartup();
   try {
@@ -1130,7 +1189,7 @@ client.once('ready', async () => {
   }
 });
 
-client.on('interactionCreate', async (interaction) => {
+client.on(Events.InteractionCreate, async (interaction) => {
   try {
     if (interaction.isAutocomplete()) {
       const focused = interaction.options.getFocused(true);

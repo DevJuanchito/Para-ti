@@ -1,6 +1,6 @@
 {
   "name": "juanplay-devjuancho",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "JUANPLAY - bot de música profesional para Discord creado por DEVJUANCHO, listo para Railway.",
   "main": "index.js",
   "scripts": {
