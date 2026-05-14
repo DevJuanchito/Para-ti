@@ -1,23 +1,28 @@
 import { REST, Routes } from 'discord.js';
-import { commands } from './commands.js';
-import { requireConfig } from './config.js';
+import { config, requireToken } from './config.js';
+import { slashCommandData } from './commands.js';
 
-const token = requireConfig('DISCORD_TOKEN');
-const clientId = requireConfig('CLIENT_ID');
-const guildId = requireConfig('GUILD_ID');
+requireToken();
 
-const rest = new REST({ version: '10' }).setToken(token);
-const body = commands.map((command) => command.data.toJSON());
+if (!config.clientId) {
+  throw new Error('Falta CLIENT_ID. Este archivo es opcional. El bot tambien registra comandos automaticamente al iniciar.');
+}
+
+const rest = new REST({ version: '10' }).setToken(config.token);
 
 try {
-  console.log('🔄 Registrando comandos slash en el servidor...');
-
-  await rest.put(
-    Routes.applicationGuildCommands(clientId, guildId),
-    { body }
-  );
-
-  console.log('✅ Comandos registrados correctamente.');
+  if (config.guildId) {
+    await rest.put(Routes.applicationGuildCommands(config.clientId, config.guildId), {
+      body: slashCommandData
+    });
+    console.log(`✅ Comandos registrados en el servidor ${config.guildId}.`);
+  } else {
+    await rest.put(Routes.applicationCommands(config.clientId), {
+      body: slashCommandData
+    });
+    console.log('✅ Comandos globales registrados. Pueden tardar en aparecer.');
+  }
 } catch (error) {
   console.error('❌ Error registrando comandos:', error);
+  process.exit(1);
 }
