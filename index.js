@@ -1,5 +1,5 @@
 /*
-  🎧 JUANPLAY DEVJUANCHO PÚBLICO v8
+  🎧 JUANPLAY DEVJUANCHO PÚBLICO v8.1
   Creado para DEVJUANCHO / JuanStudio
   Discord Music Bot con comandos slash, yt-dlp, recomendaciones, paneles decorados,
   cola completa paginada, anti-spam, botones de control y actividad dinámica.
@@ -58,7 +58,7 @@ const SUCCESS_COLOR = process.env.SUCCESS_COLOR || '#2ecc71';
 const WARNING_COLOR = process.env.WARNING_COLOR || '#f1c40f';
 const ERROR_COLOR = process.env.ERROR_COLOR || '#ff2f7d';
 const BOT_NAME = process.env.BOT_NAME || 'JUANPLAY';
-const BOT_VERSION = '8.0.0';
+const BOT_VERSION = '8.1.0';
 const BRAND = process.env.BOT_BRAND || 'DEVJUANCHO • JuanStudio';
 const BOT_INVITE_URL = process.env.BOT_INVITE_URL || '';
 const SUPPORT_SERVER = process.env.SUPPORT_SERVER || '';
@@ -71,7 +71,7 @@ if (!TOKEN) {
   process.exit(1);
 }
 
-const cookieFile = prepareCookieFile(process.env.YOUTUBE_COOKIE || process.env.YOUTUBE_COOKIES || '');
+const cookieFile = prepareCookieFile(process.env.YOUTUBE_COOKIE || process.env.YOUTUBE_COOKIES || process.env.YOUTUBE_COOKIE_BASE64 || '');
 
 const client = new Client({
   intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildVoiceStates],
@@ -210,7 +210,7 @@ function platformsEmbed() {
     '✅ **Spotify / Apple Music / Deezer / Tidal**: toma el nombre del link y busca la canción en YouTube.',
     '✅ Muchas páginas soportadas por **yt-dlp**.',
     '',
-    '⚠️ Puede funcionar **sin cookie**. Si YouTube tira **429**, agrega `YOUTUBE_COOKIE` nueva en Railway.',
+    '⚠️ Puede funcionar **sin cookie**, pero en Railway YouTube a veces pide iniciar sesión o tira **429**. En ese caso agrega `YOUTUBE_COOKIE` nueva y haz redeploy.',
   ].join('\n'));
 }
 
@@ -228,7 +228,7 @@ function setupEmbed() {
     '│ `COMMAND_COOLDOWN_MS=2500` evita spam de comandos.',
     '│ `MAX_QUEUE_SIZE=500` protege servidores públicos.',
     '│ `BOT_INVITE_URL` opcional para `/invite`.',
-    '╰─ `YOUTUBE_COOKIE` solo si YouTube bloquea con 429.',
+    '╰─ `YOUTUBE_COOKIE` solo si YouTube bloquea con 429 o dice `Sign in to confirm you’re not a bot`.',
     '',
     '🎨 **Perfil del bot:** avatar, banner y descripción se cambian en Discord Developer Portal. Desde el código sí se actualiza la actividad dinámica.',
   ].join('\n'));
@@ -382,14 +382,20 @@ function commonYtDlpFlags(extra = {}) {
 }
 
 function prepareCookieFile(rawCookie) {
-  const raw = String(rawCookie || '').trim();
+  let raw = String(rawCookie || '').trim();
   if (!raw) return null;
 
   const out = path.join(os.tmpdir(), 'juanplay-youtube-cookies.txt');
 
   try {
-    if (raw.startsWith('# Netscape HTTP Cookie File') || raw.includes('\t.youtube.com\t')) {
-      fs.writeFileSync(out, raw, 'utf8');
+    // Acepta cookies normales, archivo Netscape completo o base64 para Railway.
+    if (/^[A-Za-z0-9+/=\r\n]+$/.test(raw) && !raw.includes('=') && raw.length > 80) {
+      const decoded = Buffer.from(raw.replace(/\s+/g, ''), 'base64').toString('utf8').trim();
+      if (decoded.includes('youtube.com') || decoded.includes('SID=') || decoded.startsWith('# Netscape')) raw = decoded;
+    }
+
+    if (raw.startsWith('# Netscape HTTP Cookie File') || raw.includes('\t.youtube.com\t') || raw.includes('\t.google.com\t')) {
+      fs.writeFileSync(out, raw.endsWith('\n') ? raw : `${raw}\n`, 'utf8');
       console.log('🍪 YOUTUBE_COOKIE cargada como cookies.txt Netscape.');
       return out;
     }
@@ -432,6 +438,8 @@ function getQueue(guildId) {
     volume: DEFAULT_VOLUME,
     locked: false,
     lastError: null,
+    lastPublicErrorAt: 0,
+    lastPublicErrorKey: '',
   };
 
   player.on(AudioPlayerStatus.Idle, () => {
@@ -568,9 +576,11 @@ async function playNext(guildId) {
   } catch (error) {
     q.lastError = error;
     console.error('[JUANPLAY] No pude iniciar canción:', error);
-    if (q.textChannel) {
+    const removed = removeYouTubeTracksWhenBlocked(q, error);
+    if (q.textChannel && shouldSendPublicError(q, error)) {
+      const extra = removed ? `\n\n🧹 Para evitar spam, quité **${removed}** canciones de YouTube de la cola hasta que configures la cookie.` : '';
       q.textChannel.send({
-        embeds: [errEmbed('No pude reproducir esa canción', buildPlaybackError(error))],
+        embeds: [errEmbed('No pude reproducir esa canción', `${buildPlaybackError(error)}${extra}`)],
       }).catch(() => {});
     }
     stopTrackProcess(next);
@@ -584,15 +594,97 @@ async function playNext(guildId) {
   q.locked = false;
 }
 
+function getErrorText(error) {
+  return [
+    error?.message,
+    error?.stderr,
+    error?.stdout,
+    error?.stack,
+    String(error || ''),
+  ].filter(Boolean).join('\n');
+}
+
+function isYouTubeAuthError(error) {
+  return /sign in to confirm|not a bot|cookies-from-browser|use --cookies|confirm you.re not a bot|authentication/i.test(getErrorText(error));
+}
+
+function isYouTubeRateLimitError(error) {
+  return /429|Too Many Requests/i.test(getErrorText(error));
+}
+
+function isYouTubeUrl(url) {
+  return /youtube\.com|youtu\.be/i.test(String(url || ''));
+}
+
 function buildPlaybackError(error) {
-  const message = String(error?.message || error || 'Error desconocido');
-  if (/429|Too Many Requests/i.test(message)) {
+  const message = getErrorText(error) || 'Error desconocido';
+  if (isYouTubeAuthError(error)) {
+    return [
+      'YouTube le pidió al hosting iniciar sesión porque detectó el servidor como bot.',
+      '',
+      '✅ **Solución real:** agrega `YOUTUBE_COOKIE` nueva en Railway y haz **Redeploy**.',
+      '✅ Usa una cuenta secundaria de YouTube, no tu cuenta principal.',
+      '✅ También puedes probar SoundCloud o links directos `.mp3/.m4a/.wav`.',
+      '',
+      `Detalle: \`${cut(message, 450)}\``,
+    ].join('\n');
+  }
+  if (isYouTubeRateLimitError(error)) {
     return 'YouTube bloqueó la IP del hosting con **429**.\n\n✅ Solución: agrega una **YOUTUBE_COOKIE nueva** en Railway usando una cuenta secundaria y haz redeploy.\n\nTambién puedes probar SoundCloud o un link directo `.mp3/.m4a/.wav`.';
   }
   if (/signalling|aborted|VoiceConnection|timed out|Ready/i.test(message)) {
     return `No pude conectar a Discord Voice.\n\nRevisa permisos del canal: **Ver canales, Conectarse y Hablar**.\nSi estás en Railway y queda en \`signalling\`, el hosting puede estar bloqueando Discord Voice/UDP.\n\nDetalle: \`${cut(message, 500)}\``;
   }
   return `Detalle: \`${cut(message, 900)}\``;
+}
+
+function shouldSendPublicError(q, error) {
+  const now = Date.now();
+  const key = isYouTubeAuthError(error) ? 'youtube-auth' : isYouTubeRateLimitError(error) ? 'youtube-429' : cut(getErrorText(error), 80);
+  if (q.lastPublicErrorKey === key && now - q.lastPublicErrorAt < 30_000) return false;
+  q.lastPublicErrorKey = key;
+  q.lastPublicErrorAt = now;
+  return true;
+}
+
+function removeYouTubeTracksWhenBlocked(q, error) {
+  if (!isYouTubeAuthError(error) && !isYouTubeRateLimitError(error)) return 0;
+  if (cookieFile) return 0;
+  const before = q.tracks.length;
+  q.tracks = q.tracks.filter((track) => !isYouTubeUrl(track.url));
+  return before - q.tracks.length;
+}
+
+async function waitForYtDlpStart(proc, getStderr) {
+  if (!proc?.stdout) return;
+
+  await new Promise((resolve, reject) => {
+    let done = false;
+    const finish = (fn, value) => {
+      if (done) return;
+      done = true;
+      clearTimeout(timer);
+      proc.stdout?.off('readable', onReadable);
+      proc.off('close', onClose);
+      proc.off('error', onError);
+      fn(value);
+    };
+    const onReadable = () => finish(resolve);
+    const onClose = (code) => {
+      if (code && code !== 0) {
+        const error = new Error(`yt-dlp cerró con código ${code}: ${cut(getStderr(), 1800)}`);
+        error.stderr = getStderr();
+        return finish(reject, error);
+      }
+      return finish(resolve);
+    };
+    const onError = (error) => finish(reject, error);
+    const timer = setTimeout(() => finish(resolve), 3500);
+
+    proc.stdout.once('readable', onReadable);
+    proc.once('close', onClose);
+    proc.once('error', onError);
+  });
 }
 
 async function createYtDlpAudioResource(track) {
@@ -611,6 +703,16 @@ async function createYtDlpAudioResource(track) {
   track.process = proc;
 
   let stderr = '';
+  const getStderr = () => stderr;
+
+  // youtube-dl-exec devuelve un ChildProcess con promesa interna. Esto evita el Unhandled rejection
+  // cuando YouTube bloquea el stream antes de que Discord empiece a reproducirlo.
+  if (typeof proc.catch === 'function') {
+    proc.catch((error) => {
+      if (!stderr && error?.stderr) stderr = String(error.stderr);
+    });
+  }
+
   proc.stderr?.on('data', (chunk) => {
     stderr += chunk.toString();
     if (stderr.length > 4000) stderr = stderr.slice(-4000);
@@ -623,6 +725,8 @@ async function createYtDlpAudioResource(track) {
   proc.on('error', (error) => {
     console.warn('[JUANPLAY] Error lanzando yt-dlp:', error.message);
   });
+
+  await waitForYtDlpStart(proc, getStderr);
 
   return createAudioResource(proc.stdout, {
     inputType: StreamType.Arbitrary,

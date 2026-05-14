@@ -1,7 +1,7 @@
 {
   "name": "juanplay-devjuancho-publico-v8",
-  "version": "8.0.0",
-  "description": "JUANPLAY Music Bot público v8 por DEVJUANCHO / JuanStudio. Actividad dinámica, cola completa paginada, botones, anti-spam, yt-dlp y diseño premium.",
+  "version": "8.1.0",
+  "description": "JUANPLAY Music Bot público v8.1 por DEVJUANCHO / JuanStudio. Actividad dinámica, cola completa, botones, anti-spam, manejo de cookies YouTube y diseño premium.",
   "main": "index.js",
   "type": "commonjs",
   "scripts": {
