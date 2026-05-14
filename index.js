@@ -1,1379 +1,1088 @@
-/*
-  🎧 JUANPLAY DEVJUANCHO PÚBLICO v9
-  Desarrollado y personalizado por DEVJUANCHO
-  Discord Music Bot público con respuestas privadas anti-spam, panel único, recomendaciones privadas, botones, yt-dlp y diseño premium DEVJUANCHO.
-*/
-
-const http = require('node:http');
-const fs = require('node:fs');
-const os = require('node:os');
-const path = require('node:path');
-
-const {
-  Client,
-  GatewayIntentBits,
-  REST,
-  Routes,
-  SlashCommandBuilder,
-  EmbedBuilder,
+import {
   ActionRowBuilder,
+  ActivityType,
   ButtonBuilder,
   ButtonStyle,
+  Client,
+  EmbedBuilder,
+  Events,
+  GatewayIntentBits,
   PermissionFlagsBits,
-  ActivityType,
-} = require('discord.js');
-
-const {
-  joinVoiceChannel,
+  REST,
+  Routes,
+  SlashCommandBuilder
+} from 'discord.js';
+import {
+  AudioPlayerStatus,
+  VoiceConnectionStatus,
   createAudioPlayer,
   createAudioResource,
   entersState,
-  VoiceConnectionStatus,
-  AudioPlayerStatus,
-  NoSubscriberBehavior,
-  StreamType,
   getVoiceConnection,
-} = require('@discordjs/voice');
+  joinVoiceChannel,
+  NoSubscriberBehavior,
+  StreamType
+} from '@discordjs/voice';
+import { spawn } from 'node:child_process';
+import { createRequire } from 'node:module';
+import crypto from 'node:crypto';
+import ytSearch from 'yt-search';
+import ffmpegStatic from 'ffmpeg-static';
 
-const ytdlp = require('youtube-dl-exec');
-const yts = require('yt-search');
-const ffmpegPath = require('ffmpeg-static');
+const require = createRequire(import.meta.url);
 
-if (ffmpegPath) process.env.FFMPEG_PATH = process.env.FFMPEG_PATH || ffmpegPath;
+const CONFIG = {
+  token: process.env.DISCORD_TOKEN || process.env.TOKEN,
+  guildId: process.env.GUILD_ID || '',
+  color: parseColor(process.env.BOT_COLOR || '#ff2f7d'),
+  emoji: process.env.DEFAULT_EMOJI || '🐵',
+  developer: process.env.DEVELOPER_NAME || 'DEVJUANCHO',
+  brand: process.env.BOT_BRAND || 'JUANPLAY',
+  version: '10.0.0',
+  defaultVolume: clamp(Number(process.env.DEFAULT_VOLUME || 85), 1, 150),
+  voiceTimeoutMs: Number(process.env.VOICE_TIMEOUT_MS || 120000),
+  selfDeaf: String(process.env.VOICE_SELF_DEAF || 'true').toLowerCase() !== 'false',
+  maxPlaylistItems: Number(process.env.MAX_PLAYLIST_ITEMS || 25),
+  maxQueueSize: Number(process.env.MAX_QUEUE_SIZE || 80),
+  cooldownMs: Number(process.env.COMMAND_COOLDOWN_MS || 2500),
+  privateResponses: String(process.env.PRIVATE_COMMAND_RESPONSES || 'true').toLowerCase() !== 'false',
+  publicPanel: String(process.env.PUBLIC_NOWPLAYING_PANEL || 'true').toLowerCase() !== 'false',
+  autoRecommend: String(process.env.AUTO_RECOMMEND_AFTER_END || 'true').toLowerCase() !== 'false',
+  recommendationCount: clamp(Number(process.env.RECOMMENDATION_COUNT || 5), 1, 10),
+  youtubeCookie: process.env.YOUTUBE_COOKIE || '',
+  ffmpegPath: process.env.FFMPEG_PATH || ffmpegStatic || 'ffmpeg',
+  ytdlpPath: process.env.YTDLP_PATH || 'yt-dlp'
+};
 
-const TOKEN = process.env.DISCORD_TOKEN || process.env.TOKEN;
-const GUILD_ID = process.env.GUILD_ID || '';
-const VOICE_TIMEOUT_MS = Number(process.env.VOICE_TIMEOUT_MS || 120000);
-const VOICE_SELF_DEAF = String(process.env.VOICE_SELF_DEAF || 'true').toLowerCase() !== 'false';
-const DEFAULT_VOLUME = Math.max(1, Math.min(200, Number(process.env.DEFAULT_VOLUME || 85))) / 100;
-const MAX_PLAYLIST_ITEMS = Math.max(1, Math.min(100, Number(process.env.MAX_PLAYLIST_ITEMS || 25)));
-const BOT_COLOR = process.env.BOT_COLOR || '#ff2f7d';
-const VERSION = 'v9';
-const BRAND = `DEVJUANCHO • JUANPLAY ${VERSION}`;
-const AUTO_RECOMMEND_AFTER_END = String(process.env.AUTO_RECOMMEND_AFTER_END || 'true').toLowerCase() !== 'false';
-const PRIVATE_COMMAND_RESPONSES = String(process.env.PRIVATE_COMMAND_RESPONSES || 'true').toLowerCase() !== 'false';
-const PUBLIC_NOWPLAYING_PANEL = String(process.env.PUBLIC_NOWPLAYING_PANEL || 'true').toLowerCase() !== 'false';
-const END_RECOMMENDATIONS_MODE = String(process.env.END_RECOMMENDATIONS_MODE || 'button').toLowerCase(); // button | dm | off
-const MAX_QUEUE_SIZE = Math.max(5, Math.min(500, Number(process.env.MAX_QUEUE_SIZE || 80)));
-const COMMAND_COOLDOWN_MS = Math.max(0, Math.min(30000, Number(process.env.COMMAND_COOLDOWN_MS || 2500)));
-const PUBLIC_ERRORS = String(process.env.PUBLIC_ERRORS || 'false').toLowerCase() === 'true';
-const RECOMMENDATION_COUNT = Math.max(3, Math.min(10, Number(process.env.RECOMMENDATION_COUNT || 5)));
-const DEFAULT_EMOJI = process.env.DEFAULT_EMOJI || '🐵';
-const USER_AGENT = process.env.USER_AGENT || 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36';
-
-if (!TOKEN) {
-  console.error('❌ Falta DISCORD_TOKEN en Railway → Variables.');
-  process.exit(1);
+if (!CONFIG.token) {
+  throw new Error('Falta DISCORD_TOKEN en Railway. Agrega DISCORD_TOKEN=TU_TOKEN_DEL_BOT');
 }
-
-const cookieFile = prepareCookieFile(process.env.YOUTUBE_COOKIE || process.env.YOUTUBE_COOKIES || '');
 
 const client = new Client({
-  intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildVoiceStates],
+  intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildVoiceStates]
 });
 
-const queues = new Map();
-const searchCache = new Map();
+const guildStates = new Map();
 const cooldowns = new Map();
-setInterval(cleanSearchCache, 5 * 60 * 1000).unref();
+const searchCache = new Map();
+const pendingProcesses = new Set();
 
-function makeEmbed(title, description, color = BOT_COLOR) {
-  return new EmbedBuilder()
-    .setColor(color)
-    .setTitle(title)
-    .setDescription(description || '')
-    .setFooter({ text: `${BRAND} • Desarrollador: DEVJUANCHO` })
-    .setTimestamp();
+function parseColor(value) {
+  const clean = String(value).replace('#', '').trim();
+  const n = Number.parseInt(clean, 16);
+  return Number.isFinite(n) ? n : 0xff2f7d;
 }
 
-function decorateUser(embed, userOrInteraction, label = 'Usado por') {
-  const user = userOrInteraction?.user || userOrInteraction;
-  const member = userOrInteraction?.member;
-  const name = member?.displayName || user?.globalName || user?.username;
-  if (user && name) {
-    embed.setAuthor({
-      name: `${label} ${name}`,
-      iconURL: user.displayAvatarURL?.({ size: 128 }) || undefined,
-    });
+function clamp(num, min, max) {
+  if (Number.isNaN(num)) return min;
+  return Math.max(min, Math.min(max, num));
+}
+
+function cut(text, max = 100) {
+  const str = String(text || '').replace(/\s+/g, ' ').trim();
+  return str.length > max ? `${str.slice(0, max - 1)}…` : str;
+}
+
+function safeUrl(url) {
+  try {
+    return new URL(url).toString();
+  } catch {
+    return null;
   }
-  return embed;
-}
-
-function okEmbed(title, description, user = null) {
-  return decorateUser(makeEmbed(`✅ ${title}`, description, '#2ecc71'), user, 'Acción de');
-}
-
-function warnEmbed(title, description, user = null) {
-  return decorateUser(makeEmbed(`⚠️ ${title}`, description, '#f1c40f'), user, 'Aviso para');
-}
-
-function errEmbed(title, description, user = null) {
-  return decorateUser(makeEmbed(`❌ ${title}`, description, '#ff2f7d'), user, 'Error para');
-}
-
-function musicEmbed(title, description, user = null) {
-  return decorateUser(makeEmbed(`${DEFAULT_EMOJI} ${title}`, description, BOT_COLOR), user, 'JUANPLAY usado por');
-}
-
-function nowPlayingEmbed(track) {
-  const requester = track.requestedById ? `<@${track.requestedById}>` : `**${escapeMd(track.requestedBy || 'alguien')}**`;
-  const embed = musicEmbed('JUANPLAY MUSIC • Reproduciendo ahora', `### 🎶 [${escapeMd(track.title)}](${track.url})\n\n> 👤 **Lo pidió:** ${requester}\n> ⏱️ **Duración:** \`${track.duration || 'desconocida'}\`\n> 🌐 **Fuente:** \`${track.source || 'yt-dlp'}\`\n> 🔊 **Estado:** Música activa en tu canal de voz`);
-  embed.addFields(
-    { name: '✨ Modo', value: 'Premium DEVJUANCHO', inline: true },
-    { name: '🎛️ Controles', value: 'Usa los botones de abajo', inline: true },
-    { name: '💡 Tip', value: 'Cuando termine y la cola quede vacía, te doy recomendadas similares.', inline: false },
-  );
-  if (track.thumbnail) embed.setThumbnail(track.thumbnail);
-  if (track.requestedByAvatar) embed.setAuthor({ name: `Pedido por ${track.requestedBy || 'usuario'}`, iconURL: track.requestedByAvatar });
-  return embed;
-}
-
-function trackLine(track, index) {
-  const requester = track.requestedById ? ` • pedido por <@${track.requestedById}>` : (track.requestedBy ? ` • pedido por ${escapeMd(track.requestedBy)}` : '');
-  return `**${index}.** [${escapeMd(track.title)}](${track.url}) — \`${track.duration || '??'}\`${requester}`;
-}
-
-function fancyDivider() {
-  return '━━━━━━━━━━━━━━━━━━━━';
-}
-
-function escapeMd(text) {
-  return String(text || '')
-    .replace(/\\/g, '\\\\')
-    .replace(/\*/g, '\\*')
-    .replace(/_/g, '\\_')
-    .replace(/~/g, '\\~')
-    .replace(/`/g, '\\`')
-    .replace(/\|/g, '\\|');
-}
-
-function cleanInput(input) {
-  return String(input || '').trim().replace(/^<|>$/g, '').trim();
 }
 
 function isUrl(input) {
-  return /^https?:\/\//i.test(cleanInput(input));
+  return /^https?:\/\//i.test(String(input || '').trim());
 }
 
-function isMusicServiceThatNeedsSearch(url) {
-  return /open\.spotify\.com|music\.apple\.com|deezer\.page\.link|deezer\.com|tidal\.com|music\.amazon\.|pandora\.com/i.test(url);
+function isDirectAudioUrl(input) {
+  return /^https?:\/\/.+\.(mp3|m4a|wav|ogg|opus|flac|webm)(\?.*)?$/i.test(String(input || '').trim());
 }
 
-function directAudioUrl(url) {
-  return /\.(mp3|m4a|wav|ogg|opus|flac|aac|webm)(\?|#|$)/i.test(url);
+function isSpotifyLike(url) {
+  return /open\.spotify\.com|music\.apple\.com|deezer\.com/i.test(url);
 }
 
-function hasModule(name) {
-  try {
-    require.resolve(name);
-    return true;
-  } catch (_) {
-    return false;
+function platformName(url) {
+  if (/youtu\.?be|youtube\.com/i.test(url)) return 'YouTube';
+  if (/soundcloud\.com/i.test(url)) return 'SoundCloud';
+  if (/open\.spotify\.com/i.test(url)) return 'Spotify → YouTube';
+  if (/music\.apple\.com/i.test(url)) return 'Apple Music → YouTube';
+  if (/deezer\.com/i.test(url)) return 'Deezer → YouTube';
+  if (isDirectAudioUrl(url)) return 'Audio directo';
+  return isUrl(url) ? 'Plataforma compatible' : 'Búsqueda por nombre';
+}
+
+function baseEmbed(title, description = '') {
+  return new EmbedBuilder()
+    .setColor(CONFIG.color)
+    .setTitle(`${CONFIG.emoji} ${title}`)
+    .setDescription(description)
+    .setFooter({ text: `${CONFIG.brand} v${CONFIG.version} • Desarrollador único: ${CONFIG.developer}` })
+    .setTimestamp(new Date());
+}
+
+function progressBar() {
+  return '▰▰▰▱▱▱▱▱▱▱';
+}
+
+function getState(guildId) {
+  if (!guildStates.has(guildId)) {
+    const player = createAudioPlayer({
+      behaviors: { noSubscriber: NoSubscriberBehavior.Play }
+    });
+
+    const state = {
+      guildId,
+      player,
+      connection: null,
+      queue: [],
+      history: [],
+      current: null,
+      volume: CONFIG.defaultVolume,
+      textChannel: null,
+      panelMessage: null,
+      panelChannelId: null,
+      cleanup: null,
+      playingStartedAt: null,
+      lastError: null
+    };
+
+    player.on(AudioPlayerStatus.Playing, () => {
+      state.playingStartedAt = Date.now();
+    });
+
+    player.on(AudioPlayerStatus.Idle, () => {
+      if (state.cleanup) {
+        state.cleanup();
+        state.cleanup = null;
+      }
+      if (state.current) {
+        state.history.unshift({ ...state.current, endedAt: Date.now() });
+        state.history = state.history.slice(0, 25);
+      }
+      state.current = null;
+      playNext(state.guildId).catch((err) => {
+        console.error('[JUANPLAY] Error avanzando la cola:', err);
+        state.lastError = err?.message || String(err);
+        updatePanel(state, 'error', state.lastError).catch(() => {});
+      });
+    });
+
+    player.on('error', (error) => {
+      console.error('[JUANPLAY] Error del reproductor:', error);
+      state.lastError = error?.message || String(error);
+      if (state.cleanup) {
+        state.cleanup();
+        state.cleanup = null;
+      }
+      updatePanel(state, 'error', state.lastError).catch(() => {});
+      setTimeout(() => playNext(state.guildId).catch(() => {}), 1200);
+    });
+
+    guildStates.set(guildId, state);
   }
+  return guildStates.get(guildId);
 }
 
-function youtubePlaylistUrl(url) {
-  return /[?&]list=/i.test(url) && /youtube\.com|youtu\.be/i.test(url);
+function setIdlePresence() {
+  if (!client.user) return;
+  client.user.setPresence({
+    status: 'online',
+    activities: [
+      {
+        type: ActivityType.Listening,
+        name: `${CONFIG.brand} • /play • ${CONFIG.developer}`
+      }
+    ]
+  }).catch?.(() => {});
 }
 
-function commonYtDlpFlags(extra = {}) {
-  const flags = {
-    noWarnings: true,
-    noCheckCertificates: true,
-    preferFreeFormats: true,
-    addHeader: [
-      `user-agent:${USER_AGENT}`,
-      'referer:https://www.youtube.com/',
-      'accept-language:es-ES,es;q=0.9,en;q=0.8',
-    ],
-    retries: 5,
-    fragmentRetries: 5,
-    extractorRetries: 3,
-    socketTimeout: 20,
+function setPlayingPresence(track) {
+  if (!client.user || !track) return;
+  client.user.setPresence({
+    status: 'online',
+    activities: [
+      {
+        type: ActivityType.Listening,
+        name: cut(track.title, 120)
+      }
+    ]
+  }).catch?.(() => {});
+}
+
+function ytDlpBaseArgs() {
+  const args = [
+    '--no-warnings',
+    '--no-check-certificates',
+    '--prefer-free-formats',
+    '--add-header', 'user-agent:Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36',
+    '--add-header', 'referer:https://www.youtube.com/',
+    '--add-header', 'accept-language:es-ES,es;q=0.9,en;q=0.8',
+    '--retries', '8',
+    '--fragment-retries', '8',
+    '--extractor-retries', '4',
+    '--socket-timeout', '25'
+  ];
+  if (CONFIG.youtubeCookie) {
+    args.push('--add-header', `cookie:${CONFIG.youtubeCookie}`);
+  }
+  return args;
+}
+
+function runCommand(command, args, timeoutMs = 20000, maxOutput = 8 * 1024 * 1024) {
+  return new Promise((resolve, reject) => {
+    const child = spawn(command, args, { stdio: ['ignore', 'pipe', 'pipe'] });
+    pendingProcesses.add(child);
+    let stdout = '';
+    let stderr = '';
+    let killedByTimeout = false;
+    const timer = setTimeout(() => {
+      killedByTimeout = true;
+      child.kill('SIGKILL');
+    }, timeoutMs);
+    child.stdout.on('data', (chunk) => {
+      if (stdout.length < maxOutput) stdout += chunk.toString();
+    });
+    child.stderr.on('data', (chunk) => {
+      if (stderr.length < maxOutput) stderr += chunk.toString();
+    });
+    child.on('error', (err) => {
+      clearTimeout(timer);
+      pendingProcesses.delete(child);
+      reject(err);
+    });
+    child.on('close', (code, signal) => {
+      clearTimeout(timer);
+      pendingProcesses.delete(child);
+      if (code === 0) return resolve({ stdout, stderr });
+      reject(new Error(`${command} falló. code=${code} signal=${signal}${killedByTimeout ? ' timeout=true' : ''}\n${stderr || stdout}`));
+    });
+  });
+}
+
+async function ytdlpJson(input, extra = []) {
+  const args = [
+    ...ytDlpBaseArgs(),
+    '--dump-single-json',
+    '--skip-download',
     ...extra,
-  };
-  if (cookieFile) flags.cookies = cookieFile;
-  return flags;
+    input
+  ];
+  const { stdout } = await runCommand(CONFIG.ytdlpPath, args, 25000);
+  return JSON.parse(stdout);
 }
 
-function prepareCookieFile(rawCookie) {
-  const raw = String(rawCookie || '').trim();
-  if (!raw) return null;
-
-  const out = path.join(os.tmpdir(), 'juanplay-youtube-cookies.txt');
-
+async function searchVideos(query, limit = 5) {
+  const clean = String(query || '').trim();
+  if (!clean) return [];
   try {
-    if (raw.startsWith('# Netscape HTTP Cookie File') || raw.includes('\t.youtube.com\t')) {
-      fs.writeFileSync(out, raw, 'utf8');
-      console.log('🍪 YOUTUBE_COOKIE cargada como cookies.txt Netscape.');
-      return out;
-    }
-
-    const cleaned = raw.replace(/^cookie\s*:?\s*/i, '').replace(/^Cookie\s*:\s*/i, '').trim();
-    const rows = ['# Netscape HTTP Cookie File', '# Generado automáticamente por JUANPLAY. No compartas este archivo.'];
-    for (const part of cleaned.split(';')) {
-      const [name, ...valueParts] = part.trim().split('=');
-      const value = valueParts.join('=');
-      if (!name || !value) continue;
-      rows.push(`.youtube.com\tTRUE\t/\tTRUE\t2147483647\t${name.trim()}\t${value.trim()}`);
-      rows.push(`.google.com\tTRUE\t/\tTRUE\t2147483647\t${name.trim()}\t${value.trim()}`);
-    }
-    fs.writeFileSync(out, `${rows.join('\n')}\n`, 'utf8');
-    console.log('🍪 YOUTUBE_COOKIE cargada y convertida a cookies.txt.');
-    return out;
-  } catch (error) {
-    console.warn('⚠️ No pude preparar YOUTUBE_COOKIE:', error.message);
-    return null;
+    const results = await Promise.race([
+      ytSearch(clean),
+      new Promise((_, reject) => setTimeout(() => reject(new Error('search timeout')), 6500))
+    ]);
+    return (results?.videos || [])
+      .filter((v) => v && v.url && v.title)
+      .slice(0, limit)
+      .map((v) => ({
+        title: v.title,
+        url: v.url,
+        duration: v.timestamp || 'Desconocida',
+        thumbnail: v.thumbnail,
+        author: v.author?.name || v.author || 'YouTube',
+        source: 'YouTube'
+      }));
+  } catch (err) {
+    console.warn('[JUANPLAY] yt-search falló, usando yt-dlp:', err?.message || err);
+    const data = await ytdlpJson(`ytsearch${limit}:${clean}`, ['--flat-playlist']);
+    const entries = data?.entries || [];
+    return entries.slice(0, limit).map((e) => ({
+      title: e.title || 'Resultado de YouTube',
+      url: e.url?.startsWith('http') ? e.url : `https://www.youtube.com/watch?v=${e.id || e.url}`,
+      duration: e.duration_string || e.duration || 'Desconocida',
+      thumbnail: e.thumbnail,
+      author: e.uploader || e.channel || 'YouTube',
+      source: 'YouTube'
+    }));
   }
 }
 
-function getQueue(guildId) {
-  let q = queues.get(guildId);
-  if (q) return q;
-
-  const player = createAudioPlayer({
-    behaviors: { noSubscriber: NoSubscriberBehavior.Play },
-  });
-
-  q = {
-    guildId,
-    textChannel: null,
-    voiceChannelId: null,
-    connection: null,
-    player,
-    tracks: [],
-    current: null,
-    volume: DEFAULT_VOLUME,
-    locked: false,
-    lastError: null,
-    history: [],
-    lastRecommendations: [],
-    lastRecommendationCacheId: null,
-    lastRecommendationOwnerId: null,
-    panelMessageId: null,
-    panelChannelId: null,
-    suppressRecommendation: false,
-  };
-
-  player.on(AudioPlayerStatus.Idle, () => {
-    const ended = q.current;
-    const shouldRecommend = Boolean(ended && !q.suppressRecommendation && AUTO_RECOMMEND_AFTER_END && q.tracks.length === 0);
-    stopTrackProcess(ended);
-    if (ended) {
-      ended.finishedAt = Date.now();
-      q.history.unshift({ ...ended, process: null });
-      q.history = q.history.slice(0, 25);
-    }
-    q.current = null;
-    q.suppressRecommendation = false;
-
-    if (shouldRecommend && q.textChannel) {
-      sendEndRecommendations(q, ended).catch((error) => console.warn('[JUANPLAY] No pude enviar recomendados automáticos:', error.message));
-    }
-
-    setTimeout(() => playNext(guildId).catch(console.error), 650);
-  });
-
-  player.on('error', (error) => {
-    q.lastError = error;
-    console.error('[JUANPLAY] Error del reproductor:', error);
-    if (q.textChannel && PUBLIC_ERRORS) {
-      upsertPublicPanel(q, {
-        embeds: [errEmbed('Error reproduciendo', `Falló el stream actual. Paso a la siguiente canción.
-
-\`${cut(error.message || error, 700)}\``)],
-        components: publicPanelRows(q),
-      }).catch(() => {});
-    }
-    stopTrackProcess(q.current);
-    q.current = null;
-    setTimeout(() => playNext(guildId).catch(console.error), 750);
-  });
-
-  queues.set(guildId, q);
-  return q;
-}
-
-function stopTrackProcess(track) {
-  if (!track || !track.process) return;
+async function autocompleteVideos(query) {
+  const clean = String(query || '').trim();
+  if (clean.length < 2) return [];
   try {
-    if (!track.process.killed) track.process.kill('SIGKILL');
-  } catch (_) {}
-  track.process = null;
+    const results = await Promise.race([
+      searchVideos(clean, 8),
+      new Promise((resolve) => setTimeout(() => resolve([]), 2200))
+    ]);
+    return results.map((r) => ({
+      name: cut(`🎵 ${r.title} • ${r.author}`, 100),
+      value: cut(r.url || r.title, 100)
+    }));
+  } catch {
+    return [];
+  }
 }
 
-async function ensureVoice(interaction, q) {
+function createTrack(data, requester, originalQuery = '') {
+  return {
+    title: cut(data.title || originalQuery || 'Canción sin título', 180),
+    url: data.url || data.webpage_url || originalQuery,
+    webpageUrl: data.webpage_url || data.url || originalQuery,
+    duration: data.duration || data.duration_string || data.timestamp || 'Desconocida',
+    thumbnail: data.thumbnail || data.thumbnails?.at?.(-1)?.url || null,
+    author: data.author || data.uploader || data.channel || 'Desconocido',
+    source: data.source || platformName(data.url || originalQuery),
+    requestedById: requester.id,
+    requestedByTag: requester.tag || requester.username,
+    requestedAt: Date.now(),
+    originalQuery
+  };
+}
+
+async function resolveInput(input, requester) {
+  const query = String(input || '').trim();
+  if (!query) throw new Error('Escribe el nombre o link de una canción.');
+
+  if (isUrl(query)) {
+    const url = safeUrl(query);
+    if (!url) throw new Error('El link no parece válido.');
+
+    if (/list=|\/playlist\?/i.test(url) && /youtube\.com|youtu\.be/i.test(url)) {
+      const data = await ytdlpJson(url, ['--flat-playlist', '--playlist-end', String(CONFIG.maxPlaylistItems)]);
+      const entries = (data.entries || []).slice(0, CONFIG.maxPlaylistItems);
+      if (!entries.length) throw new Error('No encontré canciones en esa playlist.');
+      const tracks = entries.map((entry) => createTrack({
+        title: entry.title,
+        url: entry.url?.startsWith('http') ? entry.url : `https://www.youtube.com/watch?v=${entry.id || entry.url}`,
+        duration: entry.duration_string || entry.duration,
+        thumbnail: entry.thumbnail,
+        author: entry.uploader || entry.channel || 'YouTube',
+        source: 'YouTube Playlist'
+      }, requester, query));
+      return tracks;
+    }
+
+    if (isSpotifyLike(url)) {
+      let metadataText = url;
+      try {
+        const data = await ytdlpJson(url, ['--no-playlist']);
+        metadataText = [data.title, data.artist || data.uploader || data.channel].filter(Boolean).join(' ');
+      } catch {
+        metadataText = decodeURIComponent(url).replace(/[/?=&._-]+/g, ' ');
+      }
+      const results = await searchVideos(metadataText, 1);
+      if (!results.length) throw new Error('No encontré una versión reproducible para ese link.');
+      return [createTrack({ ...results[0], source: platformName(url) }, requester, query)];
+    }
+
+    try {
+      const data = isDirectAudioUrl(url)
+        ? { title: url.split('/').pop()?.split('?')[0] || 'Audio directo', url, duration: 'Desconocida', source: 'Audio directo' }
+        : await ytdlpJson(url, ['--no-playlist']);
+      return [createTrack({
+        title: data.title,
+        url: data.webpage_url || data.original_url || url,
+        duration: data.duration_string || secondsToTime(data.duration),
+        thumbnail: data.thumbnail,
+        author: data.uploader || data.channel || data.artist,
+        source: platformName(url)
+      }, requester, query)];
+    } catch (err) {
+      throw new Error(`No pude leer ese link. Prueba con el nombre de la canción. Detalle: ${cut(err.message, 180)}`);
+    }
+  }
+
+  const results = await searchVideos(query, 1);
+  if (!results.length) throw new Error('No encontré resultados con ese nombre.');
+  return [createTrack(results[0], requester, query)];
+}
+
+function secondsToTime(seconds) {
+  const n = Number(seconds);
+  if (!Number.isFinite(n) || n <= 0) return 'Desconocida';
+  const m = Math.floor(n / 60);
+  const s = Math.floor(n % 60).toString().padStart(2, '0');
+  return `${m}:${s}`;
+}
+
+async function connectToVoice(interaction) {
   const member = interaction.member;
   const voiceChannel = member?.voice?.channel;
-  if (!voiceChannel) throw new Error('Primero entra a un canal de voz.');
-
-  const permissions = voiceChannel.permissionsFor(interaction.guild.members.me);
-  if (!permissions?.has(PermissionFlagsBits.ViewChannel)) throw new Error('No tengo permiso **Ver canales** en ese canal de voz.');
-  if (!permissions?.has(PermissionFlagsBits.Connect)) throw new Error('No tengo permiso **Conectarse** en ese canal de voz.');
-  if (!permissions?.has(PermissionFlagsBits.Speak)) throw new Error('No tengo permiso **Hablar** en ese canal de voz.');
-
-  q.voiceChannelId = voiceChannel.id;
-  q.textChannel = interaction.channel;
-
-  const existing = getVoiceConnection(interaction.guild.id);
-  if (existing && existing.state.status !== VoiceConnectionStatus.Destroyed) {
-    q.connection = existing;
-    existing.subscribe(q.player);
-    if (existing.state.status === VoiceConnectionStatus.Ready) return existing;
-    await entersState(existing, VoiceConnectionStatus.Ready, VOICE_TIMEOUT_MS);
-    return existing;
+  if (!voiceChannel) {
+    throw new Error('Primero entra a un canal de voz y vuelve a usar el comando.');
   }
 
-  const connection = joinVoiceChannel({
-    channelId: voiceChannel.id,
-    guildId: interaction.guild.id,
-    adapterCreator: interaction.guild.voiceAdapterCreator,
-    selfDeaf: VOICE_SELF_DEAF,
-    selfMute: false,
+  const me = interaction.guild.members.me;
+  const perms = voiceChannel.permissionsFor(me);
+  const missing = [];
+  if (!perms?.has(PermissionFlagsBits.ViewChannel)) missing.push('Ver canal');
+  if (!perms?.has(PermissionFlagsBits.Connect)) missing.push('Conectarse');
+  if (!perms?.has(PermissionFlagsBits.Speak)) missing.push('Hablar');
+  if (missing.length) {
+    throw new Error(`Me faltan permisos en el canal de voz: ${missing.join(', ')}.`);
+  }
+
+  const state = getState(interaction.guildId);
+  state.textChannel = interaction.channel;
+
+  const old = getVoiceConnection(interaction.guildId);
+  if (old && old.joinConfig.channelId !== voiceChannel.id) {
+    old.destroy();
+    state.connection = null;
+  }
+
+  if (!state.connection || state.connection.state.status === VoiceConnectionStatus.Destroyed) {
+    state.connection = joinVoiceChannel({
+      channelId: voiceChannel.id,
+      guildId: interaction.guildId,
+      adapterCreator: interaction.guild.voiceAdapterCreator,
+      selfDeaf: CONFIG.selfDeaf
+    });
+
+    state.connection.on(VoiceConnectionStatus.Disconnected, async () => {
+      try {
+        await Promise.race([
+          entersState(state.connection, VoiceConnectionStatus.Signalling, 5000),
+          entersState(state.connection, VoiceConnectionStatus.Connecting, 5000)
+        ]);
+      } catch {
+        try { state.connection.destroy(); } catch {}
+        state.connection = null;
+        setIdlePresence();
+      }
+    });
+  }
+
+  state.connection.subscribe(state.player);
+  await entersState(state.connection, VoiceConnectionStatus.Ready, CONFIG.voiceTimeoutMs);
+  return state;
+}
+
+function createAudioPipeline(track, state) {
+  const children = [];
+  let ytdlp = null;
+  let ffmpeg = null;
+
+  if (isDirectAudioUrl(track.url)) {
+    ffmpeg = spawn(CONFIG.ffmpegPath, [
+      '-hide_banner', '-loglevel', 'error',
+      '-reconnect', '1', '-reconnect_streamed', '1', '-reconnect_delay_max', '5',
+      '-i', track.url,
+      '-vn', '-f', 's16le', '-ar', '48000', '-ac', '2', 'pipe:1'
+    ], { stdio: ['ignore', 'pipe', 'pipe'] });
+    children.push(ffmpeg);
+  } else {
+    ytdlp = spawn(CONFIG.ytdlpPath, [
+      ...ytDlpBaseArgs(),
+      '-f', 'bestaudio/best',
+      '-o', '-',
+      '--no-playlist',
+      '--quiet',
+      track.url
+    ], { stdio: ['ignore', 'pipe', 'pipe'] });
+
+    ffmpeg = spawn(CONFIG.ffmpegPath, [
+      '-hide_banner', '-loglevel', 'error',
+      '-i', 'pipe:0',
+      '-vn', '-f', 's16le', '-ar', '48000', '-ac', '2', 'pipe:1'
+    ], { stdio: ['pipe', 'pipe', 'pipe'] });
+
+    ytdlp.stdout.pipe(ffmpeg.stdin);
+    children.push(ytdlp, ffmpeg);
+  }
+
+  for (const child of children) {
+    pendingProcesses.add(child);
+    child.on('close', () => pendingProcesses.delete(child));
+    child.on('error', (err) => {
+      console.error('[JUANPLAY] Proceso de audio falló:', err?.message || err);
+    });
+    child.stderr?.on('data', (chunk) => {
+      const msg = chunk.toString().trim();
+      if (msg && !/Broken pipe|Immediate exit requested/i.test(msg)) {
+        console.warn('[JUANPLAY audio]', cut(msg, 500));
+      }
+    });
+  }
+
+  const resource = createAudioResource(ffmpeg.stdout, {
+    inputType: StreamType.Raw,
+    inlineVolume: true,
+    metadata: track
   });
+  resource.volume?.setVolume(clamp(state.volume, 1, 150) / 100);
 
-  q.connection = connection;
-  connection.subscribe(q.player);
-
-  connection.on(VoiceConnectionStatus.Disconnected, async () => {
-    try {
-      await Promise.race([
-        entersState(connection, VoiceConnectionStatus.Signalling, 5000),
-        entersState(connection, VoiceConnectionStatus.Connecting, 5000),
-      ]);
-    } catch (_) {
-      try { connection.destroy(); } catch (_) {}
-      if (q.connection === connection) q.connection = null;
+  const cleanup = () => {
+    for (const child of children) {
+      try {
+        if (!child.killed) child.kill('SIGKILL');
+      } catch {}
     }
-  });
+  };
 
-  await entersState(connection, VoiceConnectionStatus.Ready, VOICE_TIMEOUT_MS);
-  return connection;
+  return { resource, cleanup };
 }
 
 async function playNext(guildId) {
-  const q = getQueue(guildId);
-  if (q.locked) return;
-  if (q.current) return;
-
-  const next = q.tracks.shift();
-  if (!next) return;
-
-  q.locked = true;
-  q.current = next;
-
-  try {
-    if (!q.connection || q.connection.state.status === VoiceConnectionStatus.Destroyed) {
-      if (!q.voiceChannelId) throw new Error('No hay canal de voz guardado. Usa /play desde un canal de voz.');
-      const channel = await client.channels.fetch(q.voiceChannelId);
-      if (!channel) throw new Error('No encontré el canal de voz.');
-      q.connection = joinVoiceChannel({
-        channelId: channel.id,
-        guildId: guildId,
-        adapterCreator: channel.guild.voiceAdapterCreator,
-        selfDeaf: VOICE_SELF_DEAF,
-        selfMute: false,
-      });
-      q.connection.subscribe(q.player);
-      await entersState(q.connection, VoiceConnectionStatus.Ready, VOICE_TIMEOUT_MS);
-    }
-
-    const resource = await createYtDlpAudioResource(next);
-    if (resource.volume) resource.volume.setVolume(q.volume);
-    q.player.play(resource);
-
-    if (q.textChannel && PUBLIC_NOWPLAYING_PANEL) {
-      await upsertPublicPanel(q, { embeds: [nowPlayingEmbed(next)], components: publicPanelRows(q) }).catch(() => {});
-    }
-  } catch (error) {
-    q.lastError = error;
-    console.error('[JUANPLAY] No pude iniciar canción:', error);
-    if (q.textChannel && PUBLIC_ERRORS) {
-      upsertPublicPanel(q, {
-        embeds: [errEmbed('No pude reproducir esa canción', buildPlaybackError(error))],
-        components: publicPanelRows(q),
-      }).catch(() => {});
-    }
-    stopTrackProcess(next);
-    q.current = null;
-    q.locked = false;
-    setTimeout(() => playNext(guildId).catch(console.error), 800);
+  const state = getState(guildId);
+  if (!state.connection) {
+    state.current = null;
+    setIdlePresence();
     return;
   }
 
-  q.locked = false;
-}
-
-function buildPlaybackError(error) {
-  const message = String(error?.message || error || 'Error desconocido');
-  if (/429|Too Many Requests/i.test(message)) {
-    return 'YouTube bloqueó la IP del hosting con **429**.\n\n✅ Solución: agrega una **YOUTUBE_COOKIE nueva** en Railway usando una cuenta secundaria y haz redeploy.\n\nTambién puedes probar SoundCloud o un link directo `.mp3/.m4a/.wav`.';
-  }
-  if (/signalling|aborted|VoiceConnection|timed out|Ready/i.test(message)) {
-    return `No pude conectar a Discord Voice.\n\nRevisa permisos del canal: **Ver canales, Conectarse y Hablar**.\nSi estás en Railway y queda en \`signalling\`, el hosting puede estar bloqueando Discord Voice/UDP.\n\nDetalle: \`${cut(message, 500)}\``;
-  }
-  return `Detalle: \`${cut(message, 900)}\``;
-}
-
-async function createYtDlpAudioResource(track) {
-  const flags = commonYtDlpFlags({
-    output: '-',
-    format: 'bestaudio[ext=webm][acodec=opus]/bestaudio[acodec=opus]/bestaudio/best',
-    noPlaylist: true,
-    quiet: true,
-  });
-
-  const proc = ytdlp.exec(track.url, flags, {
-    windowsHide: true,
-    maxBuffer: 1024 * 1024 * 50,
-  });
-
-  track.process = proc;
-
-  let stderr = '';
-  proc.stderr?.on('data', (chunk) => {
-    stderr += chunk.toString();
-    if (stderr.length > 4000) stderr = stderr.slice(-4000);
-  });
-
-  proc.on('close', (code) => {
-    if (code && code !== 0) console.warn(`[JUANPLAY] yt-dlp cerró con código ${code}: ${cut(stderr, 700)}`);
-  });
-
-  proc.on('error', (error) => {
-    console.warn('[JUANPLAY] Error lanzando yt-dlp:', error.message);
-  });
-
-  return createAudioResource(proc.stdout, {
-    inputType: StreamType.Arbitrary,
-    inlineVolume: true,
-    metadata: track,
-  });
-}
-
-async function resolveInput(input, limit = 1) {
-  const query = cleanInput(input);
-  if (!query) return [];
-
-  if (isUrl(query)) {
-    if (isMusicServiceThatNeedsSearch(query)) {
-      const metaQuery = await queryFromMusicServiceLink(query);
-      return searchYouTube(metaQuery || query, limit);
-    }
-
-    if (youtubePlaylistUrl(query)) {
-      const list = await readPlaylist(query, Math.min(MAX_PLAYLIST_ITEMS, limit || MAX_PLAYLIST_ITEMS));
-      if (list.length) return list;
-    }
-
-    const info = await readUrlInfo(query).catch((error) => {
-      console.warn('[JUANPLAY] No pude leer link con yt-dlp, intento buscar por título:', error.message);
-      return null;
-    });
-
-    if (info) {
-      if (Array.isArray(info.entries) && info.entries.length) {
-        return info.entries.slice(0, Math.min(MAX_PLAYLIST_ITEMS, limit || MAX_PLAYLIST_ITEMS)).map(normalizeInfo).filter(Boolean);
-      }
-      const normalized = normalizeInfo(info, query);
-      if (normalized) return [normalized];
-    }
-
-    const metaQuery = await queryFromHtml(query);
-    if (metaQuery && !directAudioUrl(query)) return searchYouTube(metaQuery, limit);
-
-    if (directAudioUrl(query)) {
-      return [{
-        title: path.basename(new URL(query).pathname) || 'Audio directo',
-        url: query,
-        duration: 'directo',
-        thumbnail: null,
-        source: 'audio directo',
-      }];
-    }
-
-    throw new Error('No pude leer ese link. Prueba otro link o escribe el nombre de la canción.');
+  if (!state.queue.length) {
+    state.current = null;
+    setIdlePresence();
+    await updatePanel(state, 'ended');
+    return;
   }
 
-  return searchYouTube(query, limit);
-}
-
-async function readUrlInfo(url) {
-  return ytdlp(url, commonYtDlpFlags({
-    dumpSingleJson: true,
-    skipDownload: true,
-    noPlaylist: false,
-    playlistEnd: MAX_PLAYLIST_ITEMS,
-    quiet: true,
-  }));
-}
-
-async function readPlaylist(url, limit) {
-  const data = await ytdlp(url, commonYtDlpFlags({
-    dumpSingleJson: true,
-    skipDownload: true,
-    flatPlaylist: true,
-    yesPlaylist: true,
-    playlistEnd: limit,
-    quiet: true,
-  })).catch((error) => {
-    console.warn('[JUANPLAY] Error leyendo playlist:', error.message);
-    return null;
-  });
-  if (!data?.entries?.length) return [];
-  return data.entries.slice(0, limit).map(normalizeInfo).filter(Boolean);
-}
-
-function normalizeInfo(info, fallbackUrl = null) {
-  if (!info) return null;
-  const id = info.id || info.url;
-  let url = info.webpage_url || info.original_url || fallbackUrl || info.url;
-  if (!/^https?:\/\//i.test(String(url || '')) && id && /youtube|ytsearch/i.test(String(info.extractor || info.ie_key || ''))) {
-    url = `https://www.youtube.com/watch?v=${id}`;
-  }
-  if (!/^https?:\/\//i.test(String(url || ''))) return null;
-
-  return {
-    title: info.title || info.fulltitle || info.alt_title || 'Canción sin título',
-    url,
-    duration: formatDuration(info.duration) || info.duration_string || 'desconocida',
-    thumbnail: info.thumbnail || (Array.isArray(info.thumbnails) ? info.thumbnails.at(-1)?.url : null),
-    source: info.extractor_key || info.extractor || 'yt-dlp',
-  };
-}
-
-async function searchYouTube(query, limit = 1) {
-  const clean = cleanSearchText(query);
-  if (!clean) return [];
-
-  const fast = await searchYouTubeFast(clean, limit).catch(() => []);
-  if (fast.length) return fast;
-
-  const data = await ytdlp(`ytsearch${limit}:${clean}`, commonYtDlpFlags({
-    dumpSingleJson: true,
-    skipDownload: true,
-    flatPlaylist: true,
-    quiet: true,
-  })).catch((error) => {
-    console.warn('[JUANPLAY] Error buscando con yt-dlp:', error.message);
-    return null;
-  });
-
-  if (!data?.entries?.length) return [];
-  return data.entries.map(normalizeInfo).filter(Boolean).slice(0, limit);
-}
-
-async function searchYouTubeFast(query, limit = 10) {
-  const result = await withTimeout(yts.search(query), 5500);
-  return (result?.videos || []).slice(0, limit).map((v) => ({
-    title: v.title,
-    url: v.url,
-    duration: v.timestamp || formatDuration(v.seconds),
-    thumbnail: v.thumbnail,
-    source: 'YouTube',
-  })).filter((v) => v.title && v.url);
-}
-
-async function queryFromMusicServiceLink(url) {
-  // Primero prueba metadatos públicos de la página. Sirve para Spotify, Apple Music, Deezer, Tidal, etc.
-  const htmlTitle = await queryFromHtml(url).catch(() => null);
-  if (htmlTitle) return htmlTitle;
-  return null;
-}
-
-async function queryFromHtml(url) {
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 8000);
-  try {
-    const res = await fetch(url, {
-      signal: controller.signal,
-      headers: { 'user-agent': USER_AGENT, 'accept-language': 'es-ES,es;q=0.9,en;q=0.8' },
-    });
-    const html = await res.text();
-    const ogTitle = matchMeta(html, 'property', 'og:title') || matchMeta(html, 'name', 'twitter:title') || matchTitle(html);
-    const artist = matchMeta(html, 'property', 'music:musician') || matchMeta(html, 'name', 'music:musician');
-    const text = cleanSearchText(`${ogTitle || ''} ${artist || ''}`);
-    return text || null;
-  } catch (_) {
-    return null;
-  } finally {
-    clearTimeout(timeout);
-  }
-}
-
-function matchMeta(html, attr, key) {
-  const re = new RegExp(`<meta[^>]+${attr}=["']${escapeRegex(key)}["'][^>]+content=["']([^"']+)["'][^>]*>`, 'i');
-  const re2 = new RegExp(`<meta[^>]+content=["']([^"']+)["'][^>]+${attr}=["']${escapeRegex(key)}["'][^>]*>`, 'i');
-  return decodeHtml((html.match(re)?.[1] || html.match(re2)?.[1] || '').trim());
-}
-
-function matchTitle(html) {
-  return decodeHtml((html.match(/<title[^>]*>([^<]+)<\/title>/i)?.[1] || '').trim());
-}
-
-function cleanSearchText(text) {
-  return decodeHtml(String(text || ''))
-    .replace(/\s+/g, ' ')
-    .replace(/\s*[-|–—]\s*(Spotify|Apple Music|Deezer|TIDAL|YouTube Music|Official Music Video|Official Video|Lyrics|Letra).*$/i, '')
-    .replace(/\((Official|Video Oficial|Lyrics|Letra|Audio|Visualizer)[^)]*\)/ig, '')
-    .replace(/\[[^\]]*(Official|Lyrics|Letra|Audio|Visualizer)[^\]]*\]/ig, '')
-    .trim();
-}
-
-function decodeHtml(str) {
-  return String(str || '')
-    .replace(/&amp;/g, '&')
-    .replace(/&quot;/g, '"')
-    .replace(/&#39;/g, "'")
-    .replace(/&lt;/g, '<')
-    .replace(/&gt;/g, '>')
-    .replace(/&nbsp;/g, ' ');
-}
-
-function escapeRegex(str) {
-  return String(str).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-}
-
-function formatDuration(seconds) {
-  if (!seconds || Number.isNaN(Number(seconds))) return null;
-  const s = Math.round(Number(seconds));
-  const h = Math.floor(s / 3600);
-  const m = Math.floor((s % 3600) / 60);
-  const sec = s % 60;
-  if (h) return `${h}:${String(m).padStart(2, '0')}:${String(sec).padStart(2, '0')}`;
-  return `${m}:${String(sec).padStart(2, '0')}`;
-}
-
-function cut(text, max = 1000) {
-  const s = String(text || '');
-  return s.length > max ? `${s.slice(0, max - 3)}...` : s;
-}
-
-function withTimeout(promise, ms) {
-  return Promise.race([
-    promise,
-    new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), ms)),
-  ]);
-}
-
-async function handlePlay(interaction, query, fromButtonTrack = null) {
-  await interaction.deferReply({ ephemeral: PRIVATE_COMMAND_RESPONSES }).catch(() => {});
-  const q = getQueue(interaction.guild.id);
+  const track = state.queue.shift();
+  state.current = track;
+  state.lastError = null;
 
   try {
-    await ensureVoice(interaction, q);
-
-    let tracks;
-    if (fromButtonTrack) {
-      tracks = [fromButtonTrack];
-    } else {
-      tracks = await resolveInput(query, youtubePlaylistUrl(cleanInput(query)) ? MAX_PLAYLIST_ITEMS : 1);
-    }
-
-    if (!tracks.length) {
-      return interaction.editReply({ embeds: [errEmbed('Sin resultados', 'No encontré esa canción. Prueba otro nombre o un link directo.', interaction)] });
-    }
-
-    if (q.tracks.length + tracks.length > MAX_QUEUE_SIZE) {
-      return interaction.editReply({ embeds: [warnEmbed('Cola llena', `Este servidor tiene límite de **${MAX_QUEUE_SIZE}** canciones en cola para evitar spam.`, interaction)] });
-    }
-
-    for (const track of tracks) {
-      track.requestedBy = interaction.member?.displayName || interaction.user.globalName || interaction.user.username;
-      track.requestedById = interaction.user.id;
-      track.requestedByAvatar = interaction.user.displayAvatarURL({ size: 128 });
-      track.requestedAt = Date.now();
-      q.tracks.push(track);
-    }
-
-    const first = tracks[0];
-    const requester = `<@${interaction.user.id}>`;
-    const description = tracks.length === 1
-      ? `### 🎵 Agregué esta canción a la cola\n**[${escapeMd(first.title)}](${first.url})**\n\n${fancyDivider()}\n👤 **Usuario:** ${requester}\n⏱️ **Duración:** \`${first.duration || 'desconocida'}\`\n🌐 **Fuente:** \`${first.source || 'YouTube'}\`\n📌 **Posición:** ${q.current ? `#${q.tracks.length}` : 'suena ahora'}`
-      : `### 📀 Playlist agregada\nAgregué **${tracks.length} canciones** a la cola.\n\n👤 **Usuario:** ${requester}\n🎶 **Primera:** [${escapeMd(first.title)}](${first.url})`;
-
-    const embed = musicEmbed('JUANPLAY agregado sin spam', description, interaction);
-    embed.addFields({ name: '🔒 Privacidad', value: 'Este aviso solo lo ves tú. El canal tendrá un solo panel público de reproducción.', inline: false });
-    if (first.thumbnail) embed.setThumbnail(first.thumbnail);
-
-    await interaction.editReply({ embeds: [embed] });
-
-    if (!q.current && q.player.state.status !== AudioPlayerStatus.Playing && q.player.state.status !== AudioPlayerStatus.Paused) {
-      await playNext(interaction.guild.id);
-    }
-  } catch (error) {
-    console.error('[JUANPLAY] Error en handlePlay:', error);
-    const embed = errEmbed('No pude usar /play', buildPlaybackError(error));
-    if (interaction.deferred || interaction.replied) await interaction.editReply({ embeds: [embed] }).catch(() => {});
-    else await interaction.reply({ embeds: [embed], ephemeral: true }).catch(() => {});
+    const { resource, cleanup } = createAudioPipeline(track, state);
+    state.cleanup = cleanup;
+    state.player.play(resource);
+    setPlayingPresence(track);
+    await updatePanel(state, 'playing');
+  } catch (err) {
+    state.lastError = err?.message || String(err);
+    console.error('[JUANPLAY] No pude iniciar canción:', err);
+    await updatePanel(state, 'error', state.lastError);
+    setTimeout(() => playNext(guildId).catch(() => {}), 1000);
   }
 }
 
-async function handleSearch(interaction) {
-  const query = interaction.options.getString('busqueda', true);
-  await interaction.deferReply({ ephemeral: true });
-  const results = await searchYouTube(query, 10);
-  if (!results.length) return interaction.editReply({ embeds: [errEmbed('Sin recomendados', 'No encontré resultados para esa búsqueda.', interaction)] });
-
-  const payload = buildRecommendationsPayload({
-    title: 'Recomendados elegantes para ti',
-    description: `🔎 Búsqueda: **${escapeMd(query)}**\n${fancyDivider()}\n${results.map(trackLine).join('\n')}`,
-    results,
-    user: interaction,
-    seed: query,
-    thumbnail: results[0]?.thumbnail,
-  });
-
-  return interaction.editReply(payload);
-}
-
-async function handleSimilar(interaction) {
-  await interaction.deferReply({ ephemeral: true });
-  const q = getQueue(interaction.guild.id);
-  const seedTrack = q.current || q.history[0];
-  if (!seedTrack) {
-    return interaction.editReply({ embeds: [warnEmbed('Aún no hay base para recomendar', 'Pon una canción con `/play` y luego usa `/similares`.', interaction)] });
-  }
-  const results = await getSimilarRecommendations(seedTrack, RECOMMENDATION_COUNT + 5, q);
-  if (!results.length) return interaction.editReply({ embeds: [errEmbed('Sin similares', 'No pude encontrar recomendadas para esa canción.', interaction)] });
-  return interaction.editReply(buildRecommendationsPayload({
-    title: 'Similares según lo que sonó',
-    description: `Basado en:\n### 🎶 [${escapeMd(seedTrack.title)}](${seedTrack.url})\n${fancyDivider()}\n${results.map(trackLine).join('\n')}`,
-    results,
-    user: interaction,
-    seed: seedTrack.title,
-    thumbnail: seedTrack.thumbnail || results[0]?.thumbnail,
-  }));
-}
-
-async function sendEndRecommendations(q, endedTrack) {
-  if (!endedTrack || END_RECOMMENDATIONS_MODE === 'off') return;
-
-  const results = await getSimilarRecommendations(endedTrack, RECOMMENDATION_COUNT + 5, q);
-  if (!results.length) return;
-
-  q.lastRecommendations = results;
-  q.lastRecommendationOwnerId = endedTrack.requestedById || null;
-  q.lastRecommendationCacheId = cacheResults(results, endedTrack.title);
-
-  // Anti-spam público: NO manda la lista al canal.
-  // Solo actualiza el panel único con un botón; la lista se ve privada/ephemeral cuando alguien la pide.
-  if (q.textChannel && PUBLIC_NOWPLAYING_PANEL && END_RECOMMENDATIONS_MODE === 'button') {
-    const embed = musicEmbed('Canción terminada', [
-      `### ✅ [${escapeMd(endedTrack.title)}](${endedTrack.url})`,
-      '',
-      'El canal queda limpio: las recomendaciones no se publican aquí.',
-      'Toca **Recomendados privados** para ver canciones similares solo para ti.',
-      '',
-      `👤 **La pidió:** ${endedTrack.requestedById ? `<@${endedTrack.requestedById}>` : escapeMd(endedTrack.requestedBy || 'usuario')}`,
-      `👑 **Desarrollador:** DEVJUANCHO`,
-    ].join('\n'));
-    if (endedTrack.thumbnail) embed.setThumbnail(endedTrack.thumbnail);
-    await upsertPublicPanel(q, { embeds: [embed], components: publicPanelRows(q) }).catch(() => {});
-  }
-
-  // Opcional: DM al usuario que pidió la canción. Desactivado por defecto para no molestar.
-  if (END_RECOMMENDATIONS_MODE === 'dm' && endedTrack.requestedById) {
-    const user = await client.users.fetch(endedTrack.requestedById).catch(() => null);
-    if (user) {
-      const payload = buildRecommendationsPayload({
-        title: 'Recomendadas privadas de JUANPLAY',
-        description: `Basado en:\n### 🎶 [${escapeMd(endedTrack.title)}](${endedTrack.url})\n${fancyDivider()}\n${results.slice(0, RECOMMENDATION_COUNT).map(trackLine).join('\n')}`,
-        results: results.slice(0, RECOMMENDATION_COUNT),
-        seed: endedTrack.title,
-        thumbnail: endedTrack.thumbnail || results[0]?.thumbnail,
-      });
-      await user.send(payload).catch(() => {});
-    }
-  }
-}
-
-async function getSimilarRecommendations(track, limit = 8, q = null) {
-  const seed = recommendationSeed(track);
-  const queries = [
-    `${seed} canciones similares`,
-    `${seed} mix`,
-    `${seed} radio`,
-  ];
-
-  const seen = new Set([normalizeKey(track?.url), normalizeKey(track?.title)]);
-  for (const old of q?.history || []) {
-    seen.add(normalizeKey(old.url));
-    seen.add(normalizeKey(old.title));
-  }
-
-  const combined = [];
-  for (const query of queries) {
-    const found = await searchYouTube(query, Math.max(limit, 8)).catch(() => []);
-    for (const item of found) {
-      const keyUrl = normalizeKey(item.url);
-      const keyTitle = normalizeKey(item.title);
-      if (!keyUrl || seen.has(keyUrl) || seen.has(keyTitle)) continue;
-      seen.add(keyUrl);
-      seen.add(keyTitle);
-      combined.push(item);
-      if (combined.length >= limit) return combined;
-    }
-  }
-  return combined;
-}
-
-function recommendationSeed(track) {
-  return cleanSearchText(String(track?.title || '')
-    .replace(/\b(official|video|lyrics|letra|audio|visualizer|hd|4k)\b/ig, '')
-    .replace(/\([^)]*\)|\[[^\]]*\]/g, '')
-    .replace(/\s+/g, ' ')
-    .trim()) || track?.title || 'musica recomendada';
-}
-
-function normalizeKey(value) {
-  return String(value || '').toLowerCase().replace(/https?:\/\/(www\.)?/, '').replace(/[^a-z0-9]+/g, '').slice(0, 80);
-}
-
-function cacheResults(results, seed = '') {
-  const id = `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
-  searchCache.set(id, { createdAt: Date.now(), results, seed });
-  return id;
-}
-
-function buildRecommendationsPayload({ title, description, results, user = null, seed = '', thumbnail = null }) {
-  const id = cacheResults(results, seed);
-  const embed = musicEmbed(title, description, user);
-  embed.addFields(
-    { name: '🔒 Privado anti-spam', value: 'Esta lista solo la ves tú. Toca un número para reproducir esa recomendada.', inline: false },
-    { name: '👤 Solicitado por', value: user?.user ? `<@${user.user.id}>` : 'Panel privado JUANPLAY', inline: true },
-    { name: '👑 Developer', value: 'DEVJUANCHO', inline: true },
+function nowPlayingEmbed(state) {
+  const t = state.current;
+  if (!t) return baseEmbed('JUANPLAY está listo', 'Usa `/play` o `/juanplay` para poner música.');
+  const embed = baseEmbed('JUANPLAY está sonando',
+    `### [${cut(t.title, 90)}](${t.webpageUrl || t.url})\n` +
+    `**Pedido por:** <@${t.requestedById}>\n` +
+    `**Canal / fuente:** ${t.source}\n` +
+    `**Duración:** ${t.duration || 'Desconocida'}\n` +
+    `**Volumen:** ${state.volume}%\n` +
+    `**Cola:** ${state.queue.length} canción(es)\n\n` +
+    `${progressBar()}\n` +
+    `**Desarrollador:** ${CONFIG.developer}`
   );
-  if (thumbnail) embed.setThumbnail(thumbnail);
-  return { embeds: [embed], components: recommendationRows(id, results) };
+  if (t.thumbnail) embed.setThumbnail(t.thumbnail);
+  return embed;
 }
 
-function recommendationRows(id, results) {
+function playerButtons(state, ended = false) {
+  const playing = state.player.state.status === AudioPlayerStatus.Playing;
+  const row1 = new ActionRowBuilder().addComponents(
+    new ButtonBuilder()
+      .setCustomId(playing ? 'jp:pause' : 'jp:resume')
+      .setLabel(playing ? 'Pausar' : 'Seguir')
+      .setEmoji(playing ? '⏸️' : '▶️')
+      .setStyle(playing ? ButtonStyle.Secondary : ButtonStyle.Success)
+      .setDisabled(ended),
+    new ButtonBuilder()
+      .setCustomId('jp:skip')
+      .setLabel('Saltar')
+      .setEmoji('⏭️')
+      .setStyle(ButtonStyle.Primary)
+      .setDisabled(ended),
+    new ButtonBuilder()
+      .setCustomId('jp:stop')
+      .setLabel('Stop')
+      .setEmoji('🛑')
+      .setStyle(ButtonStyle.Danger)
+      .setDisabled(ended),
+    new ButtonBuilder()
+      .setCustomId('jp:queue')
+      .setLabel('Cola privada')
+      .setEmoji('📜')
+      .setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder()
+      .setCustomId('jp:similar')
+      .setLabel('Recomendados')
+      .setEmoji('✨')
+      .setStyle(ButtonStyle.Success)
+  );
+  return [row1];
+}
+
+async function updatePanel(state, mode = 'playing', detail = '') {
+  if (!CONFIG.publicPanel || !state.textChannel) return;
+
+  let embed;
+  let components = playerButtons(state, mode === 'ended');
+
+  if (mode === 'playing') {
+    embed = nowPlayingEmbed(state);
+  } else if (mode === 'ended') {
+    if (state.queue.length || state.current) return;
+    embed = baseEmbed('La música terminó',
+      `No mandaré recomendaciones públicas para no spamear.\n` +
+      `Pulsa **Recomendados** y solo tú verás sugerencias privadas.\n\n` +
+      `**Última canción:** ${state.history[0] ? `[${cut(state.history[0].title, 80)}](${state.history[0].webpageUrl || state.history[0].url})` : 'Ninguna'}\n` +
+      `**Desarrollador:** ${CONFIG.developer}`
+    );
+    if (state.history[0]?.thumbnail) embed.setThumbnail(state.history[0].thumbnail);
+  } else if (mode === 'error') {
+    embed = baseEmbed('JUANPLAY tuvo un problema de audio',
+      `Voy a intentar seguir con la siguiente canción.\n\n` +
+      `**Detalle corto:** ${cut(detail || 'Error desconocido', 250)}\n` +
+      `**Tip:** Usa /diagnostico para revisar FFmpeg, yt-dlp y Opus.`
+    );
+  } else {
+    embed = baseEmbed('JUANPLAY', 'Panel actualizado.');
+  }
+
+  try {
+    if (state.panelMessage) {
+      await state.panelMessage.edit({ embeds: [embed], components });
+      return;
+    }
+    const msg = await state.textChannel.send({ embeds: [embed], components });
+    state.panelMessage = msg;
+    state.panelChannelId = state.textChannel.id;
+  } catch (err) {
+    console.warn('[JUANPLAY] No pude actualizar panel:', err?.message || err);
+    state.panelMessage = null;
+  }
+}
+
+function queueEmbed(state, user) {
+  if (!state.current && !state.queue.length) {
+    return baseEmbed('Cola de JUANPLAY', `No hay música en cola.\nSolicitado por: <@${user.id}>`);
+  }
+  const lines = [];
+  if (state.current) lines.push(`**Sonando:** [${cut(state.current.title, 70)}](${state.current.webpageUrl || state.current.url}) • <@${state.current.requestedById}>`);
+  if (state.queue.length) {
+    lines.push('', '**Siguientes:**');
+    state.queue.slice(0, 10).forEach((t, i) => lines.push(`[0m${i + 1}. [${cut(t.title, 65)}](${t.webpageUrl || t.url}) • <@${t.requestedById}>`));
+    if (state.queue.length > 10) lines.push(`…y ${state.queue.length - 10} más.`);
+  }
+  lines.push('', `**Solicitado por:** <@${user.id}>`);
+  return baseEmbed('Cola privada de JUANPLAY', lines.join('\n'));
+}
+
+async function sendPrivate(interaction, payload) {
+  const data = { ...payload, ephemeral: true };
+  if (interaction.deferred || interaction.replied) return interaction.editReply(payload).catch(() => interaction.followUp(data));
+  return interaction.reply(data);
+}
+
+function isCooldown(interaction) {
+  const key = `${interaction.user.id}:${interaction.commandName || interaction.customId}`;
+  const now = Date.now();
+  const last = cooldowns.get(key) || 0;
+  if (now - last < CONFIG.cooldownMs) return Math.ceil((CONFIG.cooldownMs - (now - last)) / 1000);
+  cooldowns.set(key, now);
+  return 0;
+}
+
+async function handlePlay(interaction, input) {
+  const wait = isCooldown(interaction);
+  if (wait) {
+    return interaction.reply({ content: `⏳ Espera ${wait}s antes de usar otra vez el comando.`, ephemeral: true });
+  }
+  await interaction.deferReply({ ephemeral: CONFIG.privateResponses });
+
+  let state;
+  try {
+    state = await connectToVoice(interaction);
+  } catch (err) {
+    return interaction.editReply({ embeds: [baseEmbed('No pude entrar al canal de voz', err.message)] });
+  }
+
+  if (state.queue.length >= CONFIG.maxQueueSize) {
+    return interaction.editReply({ embeds: [baseEmbed('Cola llena', `La cola tiene el límite de ${CONFIG.maxQueueSize} canciones.`)] });
+  }
+
+  try {
+    const tracks = await resolveInput(input, interaction.user);
+    const available = Math.max(0, CONFIG.maxQueueSize - state.queue.length);
+    const accepted = tracks.slice(0, available);
+    state.queue.push(...accepted);
+
+    const shouldStart = !state.current && state.player.state.status !== AudioPlayerStatus.Playing;
+    if (shouldStart) await playNext(interaction.guildId);
+
+    const embed = baseEmbed('Agregado a JUANPLAY',
+      accepted.length === 1
+        ? `**Canción:** [${cut(accepted[0].title, 80)}](${accepted[0].webpageUrl || accepted[0].url})\n**La pidió:** <@${interaction.user.id}>\n**Posición en cola:** ${shouldStart ? 'Sonando ahora' : state.queue.length}`
+        : `Agregué **${accepted.length}** canciones a la cola.\n**Pedido por:** <@${interaction.user.id}>`
+    );
+    if (accepted[0]?.thumbnail) embed.setThumbnail(accepted[0].thumbnail);
+    return interaction.editReply({ embeds: [embed] });
+  } catch (err) {
+    console.error('[JUANPLAY] Error en /play:', err);
+    return interaction.editReply({ embeds: [baseEmbed('No pude reproducir eso', cut(err.message || String(err), 500))] });
+  }
+}
+
+function cacheResults(results, requesterId) {
+  const key = crypto.randomBytes(5).toString('hex');
+  searchCache.set(key, { results, requesterId, createdAt: Date.now() });
+  setTimeout(() => searchCache.delete(key), 15 * 60 * 1000).unref?.();
+  return key;
+}
+
+function resultsButtons(key, results) {
   const rows = [];
-  const max = Math.min(results.length, 10);
-  for (let row = 0; row < Math.ceil(max / 5); row++) {
-    const actionRow = new ActionRowBuilder();
-    for (let i = row * 5; i < Math.min(max, row * 5 + 5); i++) {
-      actionRow.addComponents(
-        new ButtonBuilder()
-          .setCustomId(`jp_pick:${id}:${i}`)
-          .setLabel(`${i + 1}`)
-          .setEmoji('🎵')
-          .setStyle(i === 0 ? ButtonStyle.Success : ButtonStyle.Primary)
-      );
+  let row = new ActionRowBuilder();
+  results.slice(0, 5).forEach((_, i) => {
+    if (row.components.length === 5) {
+      rows.push(row);
+      row = new ActionRowBuilder();
     }
-    rows.push(actionRow);
-  }
-  if (rows.length < 5) {
-    rows.push(new ActionRowBuilder().addComponents(
-      new ButtonBuilder().setCustomId(`jp_more:${id}`).setLabel('Más similares').setEmoji('✨').setStyle(ButtonStyle.Secondary),
-      new ButtonBuilder().setCustomId('jp_queue').setLabel('Ver cola').setEmoji('📜').setStyle(ButtonStyle.Secondary),
-    ));
-  }
+    row.addComponents(new ButtonBuilder()
+      .setCustomId(`jp:add:${key}:${i}`)
+      .setLabel(`Poner #${i + 1}`)
+      .setEmoji('🎵')
+      .setStyle(ButtonStyle.Success));
+  });
+  if (row.components.length) rows.push(row);
   return rows;
 }
 
-function publicPanelRows(q = null) {
-  const rows = [new ActionRowBuilder().addComponents(
-    new ButtonBuilder().setCustomId('jp_pause').setLabel('Pausar').setEmoji('⏸️').setStyle(ButtonStyle.Secondary),
-    new ButtonBuilder().setCustomId('jp_resume').setLabel('Seguir').setEmoji('▶️').setStyle(ButtonStyle.Success),
-    new ButtonBuilder().setCustomId('jp_skip').setLabel('Saltar').setEmoji('⏭️').setStyle(ButtonStyle.Primary),
-    new ButtonBuilder().setCustomId('jp_queue').setLabel('Cola privada').setEmoji('📜').setStyle(ButtonStyle.Secondary),
-    new ButtonBuilder().setCustomId('jp_stop').setLabel('Stop').setEmoji('⏹️').setStyle(ButtonStyle.Danger),
-  )];
-
-  rows.push(new ActionRowBuilder().addComponents(
-    new ButtonBuilder().setCustomId(`jp_private_recs:${q?.lastRecommendationCacheId || 'current'}`).setLabel('Recomendados privados').setEmoji('✨').setStyle(ButtonStyle.Secondary),
-    new ButtonBuilder().setCustomId('jp_now_private').setLabel('Ahora privado').setEmoji('🎧').setStyle(ButtonStyle.Secondary),
-    new ButtonBuilder().setCustomId('jp_credits_private').setLabel('Créditos').setEmoji('👑').setStyle(ButtonStyle.Secondary),
-  ));
-  return rows;
+async function handleSearch(interaction, query, title = 'Resultados privados') {
+  await interaction.deferReply({ ephemeral: true });
+  const results = await searchVideos(query, 5);
+  if (!results.length) {
+    return interaction.editReply({ embeds: [baseEmbed('Sin resultados', 'No encontré canciones con ese texto.')] });
+  }
+  const key = cacheResults(results, interaction.user.id);
+  const desc = results.map((r, i) => `**${i + 1}.** [${cut(r.title, 75)}](${r.url})\n${r.author || 'YouTube'} • ${r.duration || 'Desconocida'}`).join('\n\n');
+  return interaction.editReply({ embeds: [baseEmbed(title, `${desc}\n\nSolo tú ves estos botones.`)], components: resultsButtons(key, results) });
 }
 
-function controlRows() {
-  return publicPanelRows(null);
+async function recommendationResults(state, query = '') {
+  let base = query?.trim();
+  if (!base && state.current) base = `${state.current.title} ${state.current.author || ''}`;
+  if (!base && state.history[0]) base = `${state.history[0].title} ${state.history[0].author || ''}`;
+  if (!base) base = 'música latina popular 2026';
+  const cleaned = base.replace(/\(official.*?\)|\[official.*?\]|video oficial|official video|lyrics|letra/ig, '').trim();
+  return searchVideos(`${cleaned} canciones similares`, CONFIG.recommendationCount);
 }
 
-async function upsertPublicPanel(q, payload) {
-  if (!q?.textChannel || !PUBLIC_NOWPLAYING_PANEL) return null;
+async function handleRecommendations(interaction, query = '') {
+  await interaction.deferReply({ ephemeral: true });
+  const state = getState(interaction.guildId);
+  const results = await recommendationResults(state, query);
+  if (!results.length) return interaction.editReply({ embeds: [baseEmbed('Sin recomendados', 'No encontré recomendados ahora mismo.')] });
+  const key = cacheResults(results, interaction.user.id);
+  const desc = results.map((r, i) => `**${i + 1}.** [${cut(r.title, 75)}](${r.url})\n${r.author || 'YouTube'} • ${r.duration || 'Desconocida'}`).join('\n\n');
+  return interaction.editReply({ embeds: [baseEmbed('Recomendados para ti', `${desc}\n\nEstos recomendados solo los ves tú.`)], components: resultsButtons(key, results) });
+}
 
-  const finalPayload = { ...payload };
-  if (!finalPayload.components) finalPayload.components = publicPanelRows(q);
-
+async function handleAddButton(interaction, key, index) {
+  const entry = searchCache.get(key);
+  if (!entry) return interaction.reply({ content: '⏳ Esa búsqueda ya expiró. Usa /buscar otra vez.', ephemeral: true });
+  if (entry.requesterId !== interaction.user.id) {
+    return interaction.reply({ content: '🔒 Estos botones son privados de otra persona. Usa /buscar o /recomendados para crear los tuyos.', ephemeral: true });
+  }
+  const result = entry.results[Number(index)];
+  if (!result) return interaction.reply({ content: 'No encontré ese resultado.', ephemeral: true });
+  await interaction.deferReply({ ephemeral: true });
+  let state;
   try {
-    if (q.panelMessageId && q.panelChannelId === q.textChannel.id) {
-      const existing = await q.textChannel.messages.fetch(q.panelMessageId).catch(() => null);
-      if (existing) {
-        const edited = await existing.edit(finalPayload);
-        q.panelMessageId = edited.id;
-        q.panelChannelId = edited.channelId;
-        return edited;
-      }
-    }
-
-    const sent = await q.textChannel.send(finalPayload);
-    q.panelMessageId = sent.id;
-    q.panelChannelId = sent.channelId;
-    return sent;
-  } catch (error) {
-    console.warn('[JUANPLAY] No pude actualizar panel público:', error.message);
-    return null;
+    state = await connectToVoice(interaction);
+    const track = createTrack(result, interaction.user, result.title);
+    state.queue.push(track);
+    const shouldStart = !state.current && state.player.state.status !== AudioPlayerStatus.Playing;
+    if (shouldStart) await playNext(interaction.guildId);
+    return interaction.editReply({ embeds: [baseEmbed('Agregado desde botones', `**${cut(track.title, 90)}**\nPedido por <@${interaction.user.id}>\n${shouldStart ? 'Sonando ahora.' : `Cola: ${state.queue.length}`}`)] });
+  } catch (err) {
+    return interaction.editReply({ embeds: [baseEmbed('No pude agregarlo', cut(err.message || String(err), 500))] });
   }
 }
 
-
-async function handleAutocomplete(interaction) {
-  const focused = interaction.options.getFocused(true);
-  if (focused.name !== 'busqueda') return interaction.respond([]).catch(() => {});
-
-  const query = cleanInput(focused.value);
-  if (!query || query.length < 2 || isUrl(query)) {
-    return interaction.respond([
-      { name: 'Pega un link de YouTube, SoundCloud, Spotify, Apple Music, Deezer o escribe un nombre', value: query || 'Paulo Londra No Puedo' },
-    ]).catch(() => {});
-  }
-
-  try {
-    const results = await withTimeout(searchYouTubeFast(query, 10), 2400);
-    const choices = results.slice(0, 10).map((track) => ({
-      name: cut(`🎵 ${track.title} • ${track.duration || '??'}`, 100),
-      value: cut(track.title, 100),
-    }));
-    return interaction.respond(choices.length ? choices : [{ name: `Buscar: ${cut(query, 90)}`, value: cut(query, 100) }]).catch(() => {});
-  } catch (_) {
-    return interaction.respond([{ name: `Buscar: ${cut(query, 90)}`, value: cut(query, 100) }]).catch(() => {});
-  }
+function sameVoice(interaction, state) {
+  const userChannel = interaction.member?.voice?.channelId;
+  const botChannel = state.connection?.joinConfig?.channelId;
+  return userChannel && botChannel && userChannel === botChannel;
 }
 
 async function handleButton(interaction) {
-  if (interaction.customId.startsWith('jp_pick:')) {
-    const [, id, indexRaw] = interaction.customId.split(':');
-    const cached = searchCache.get(id);
-    const index = Number(indexRaw);
-    const track = cached?.results?.[index];
-    if (!track) return interaction.reply({ embeds: [errEmbed('Botón expirado', 'Haz `/buscar` otra vez para generar recomendados nuevos.', interaction)], ephemeral: true });
-    return handlePlay(interaction, track.title, track);
+  const [prefix, action, key, index] = interaction.customId.split(':');
+  if (prefix !== 'jp') return;
+  if (action === 'add') return handleAddButton(interaction, key, index);
+
+  const state = getState(interaction.guildId);
+  if (['pause', 'resume', 'skip', 'stop'].includes(action) && !sameVoice(interaction, state)) {
+    return interaction.reply({ content: 'Entra al mismo canal de voz del bot para usar esos controles.', ephemeral: true });
   }
 
-  if (interaction.customId.startsWith('jp_more:')) {
-    const [, id] = interaction.customId.split(':');
-    const cached = searchCache.get(id);
-    const seed = cached?.seed || cached?.results?.[0]?.title;
-    if (!seed) return interaction.reply({ embeds: [errEmbed('Botón expirado', 'Haz `/recomendados` otra vez.', interaction)], ephemeral: true });
-    await interaction.deferReply({ ephemeral: true });
-    const pseudoTrack = { title: seed, url: cached?.results?.[0]?.url || '' };
-    const q = getQueue(interaction.guild.id);
-    const results = await getSimilarRecommendations(pseudoTrack, 10, q);
-    if (!results.length) return interaction.editReply({ embeds: [warnEmbed('No encontré más similares', 'Prueba con otro nombre de canción.', interaction)] });
-    return interaction.editReply(buildRecommendationsPayload({
-      title: 'Más recomendadas JUANPLAY',
-      description: `Basado en: **${escapeMd(seed)}**\n${fancyDivider()}\n${results.map(trackLine).join('\n')}`,
-      results,
-      user: interaction,
-      seed,
-      thumbnail: results[0]?.thumbnail,
-    }));
+  if (action === 'pause') {
+    state.player.pause();
+    await updatePanel(state, 'playing');
+    return interaction.reply({ content: '⏸️ Pausado.', ephemeral: true });
   }
-
-  if (interaction.customId.startsWith('jp_private_recs:')) {
-    const [, id] = interaction.customId.split(':');
-    await interaction.deferReply({ ephemeral: true });
-    const q = getQueue(interaction.guild.id);
-
-    let results = [];
-    let seed = '';
-    let thumbnail = null;
-
-    if (id && id !== 'current') {
-      const cached = searchCache.get(id);
-      results = cached?.results || [];
-      seed = cached?.seed || results[0]?.title || '';
-      thumbnail = results[0]?.thumbnail || null;
+  if (action === 'resume') {
+    state.player.unpause();
+    await updatePanel(state, 'playing');
+    return interaction.reply({ content: '▶️ Siguiendo.', ephemeral: true });
+  }
+  if (action === 'skip') {
+    state.player.stop(true);
+    return interaction.reply({ content: '⏭️ Saltando canción.', ephemeral: true });
+  }
+  if (action === 'stop') {
+    state.queue = [];
+    state.player.stop(true);
+    if (state.connection) {
+      try { state.connection.destroy(); } catch {}
+      state.connection = null;
     }
-
-    if (!results.length) {
-      const seedTrack = q.current || q.history[0];
-      if (!seedTrack) {
-        return interaction.editReply({ embeds: [warnEmbed('Sin base para recomendar', 'Pon una canción primero con `/play` y luego vuelve a tocar este botón.', interaction)] });
-      }
-      seed = seedTrack.title;
-      thumbnail = seedTrack.thumbnail;
-      results = await getSimilarRecommendations(seedTrack, RECOMMENDATION_COUNT + 5, q);
-    }
-
-    if (!results.length) {
-      return interaction.editReply({ embeds: [warnEmbed('No encontré recomendadas', 'Prueba con `/buscar nombre de canción`.', interaction)] });
-    }
-
-    return interaction.editReply(buildRecommendationsPayload({
-      title: 'Recomendados privados JUANPLAY',
-      description: `Basado en: **${escapeMd(seed)}**\n${fancyDivider()}\n${results.slice(0, RECOMMENDATION_COUNT).map(trackLine).join('\n')}`,
-      results: results.slice(0, RECOMMENDATION_COUNT),
-      user: interaction,
-      seed,
-      thumbnail,
-    }));
+    state.current = null;
+    setIdlePresence();
+    await updatePanel(state, 'ended');
+    return interaction.reply({ content: '🛑 Música detenida y cola limpiada.', ephemeral: true });
   }
-
-  if (interaction.customId === 'jp_now_private') {
-    const q = getQueue(interaction.guild.id);
-    if (!q.current) return interaction.reply({ embeds: [warnEmbed('Nada sonando', 'Ahora mismo no hay música activa.', interaction)], ephemeral: true });
-    return interaction.reply({ embeds: [nowPlayingEmbed(q.current)], components: publicPanelRows(q), ephemeral: true });
+  if (action === 'queue') {
+    return interaction.reply({ embeds: [queueEmbed(state, interaction.user)], ephemeral: true });
   }
-
-  if (interaction.customId === 'jp_credits_private') {
-    return interaction.reply({ embeds: [creditsEmbed()], ephemeral: true });
-  }
-
-  const q = getQueue(interaction.guild.id);
-  if (interaction.customId === 'jp_pause') {
-    const ok = q.player.pause(true);
-    return interaction.reply({ embeds: [ok ? okEmbed('Pausado', 'La música quedó pausada.', interaction) : warnEmbed('No pude pausar', 'No hay música sonando.', interaction)], ephemeral: true });
-  }
-  if (interaction.customId === 'jp_resume') {
-    const ok = q.player.unpause();
-    return interaction.reply({ embeds: [ok ? okEmbed('Reanudado', 'La música sigue sonando.', interaction) : warnEmbed('No pude reanudar', 'No hay música pausada.', interaction)], ephemeral: true });
-  }
-  if (interaction.customId === 'jp_skip') {
-    if (!q.current) return interaction.reply({ embeds: [warnEmbed('Sin canción', 'No hay nada para saltar.', interaction)], ephemeral: true });
-    q.suppressRecommendation = true;
-    q.player.stop(true);
-    return interaction.reply({ embeds: [okEmbed('Saltado', 'Pasando a la siguiente canción.', interaction)], ephemeral: true });
-  }
-  if (interaction.customId === 'jp_stop') {
-    q.suppressRecommendation = true;
-    q.tracks = [];
-    stopTrackProcess(q.current);
-    q.current = null;
-    q.player.stop(true);
-    return interaction.reply({ embeds: [okEmbed('Detenido', 'Música detenida y cola limpiada.', interaction)], ephemeral: true });
-  }
-  if (interaction.customId === 'jp_queue') {
-    const lines = buildQueueLines(q);
-    return interaction.reply({ embeds: [musicEmbed('Cola JUANPLAY', lines || 'La cola está vacía. Usa `/play` o `/buscar`.', interaction)], ephemeral: true });
+  if (action === 'similar') {
+    return handleRecommendations(interaction, '');
   }
 }
 
-function cleanSearchCache() {
-  const now = Date.now();
-  for (const [id, data] of searchCache.entries()) {
-    if (now - data.createdAt > 15 * 60 * 1000) searchCache.delete(id);
+async function diagnosticsEmbed(interaction) {
+  const lines = [];
+  lines.push(`**Bot:** ${client.user?.tag || 'No conectado'}`);
+  lines.push(`**Servidor:** ${interaction.guild?.name || interaction.guildId}`);
+  lines.push(`**Node:** ${process.version}`);
+  lines.push(`**FFmpeg:** ${CONFIG.ffmpegPath}`);
+  lines.push(`**yt-dlp:** ${CONFIG.ytdlpPath}`);
+  lines.push(`**Cookie YouTube:** ${CONFIG.youtubeCookie ? 'Configurada' : 'No configurada (puede funcionar sin ella)'}`);
+  try {
+    require.resolve('opusscript');
+    lines.push('**Opus:** OK (`opusscript`)');
+  } catch {
+    lines.push('**Opus:** ❌ Falta `opusscript`');
   }
+  try {
+    const r = await runCommand(CONFIG.ytdlpPath, ['--version'], 10000, 10000);
+    lines.push(`**yt-dlp versión:** ${cut(r.stdout.trim(), 60)}`);
+  } catch (err) {
+    lines.push(`**yt-dlp prueba:** ❌ ${cut(err.message, 120)}`);
+  }
+  try {
+    const r = await runCommand(CONFIG.ffmpegPath, ['-version'], 10000, 10000);
+    lines.push(`**FFmpeg versión:** ${cut(r.stdout.split('\n')[0], 100)}`);
+  } catch (err) {
+    lines.push(`**FFmpeg prueba:** ❌ ${cut(err.message, 120)}`);
+  }
+  const state = getState(interaction.guildId);
+  lines.push(`**Conexión voz:** ${state.connection?.state?.status || 'sin conexión'}`);
+  lines.push(`**Player:** ${state.player?.state?.status || 'desconocido'}`);
+  lines.push(`**Cola:** ${state.queue.length}`);
+  if (state.lastError) lines.push(`**Último error:** ${cut(state.lastError, 200)}`);
+  return baseEmbed('Diagnóstico JUANPLAY', lines.join('\n'));
 }
 
-function buildCommands() {
-  const playOption = (option) => option
-    .setName('busqueda')
-    .setDescription('Nombre o link: YouTube, SoundCloud, Spotify, Apple Music, Deezer, mp3, etc.')
-    .setRequired(true)
-    .setAutocomplete(true);
-
-  return [
-    new SlashCommandBuilder()
-      .setName('play')
-      .setDescription('🎵 Reproduce música por nombre o link con JUANPLAY')
-      .addStringOption(playOption),
-
-    new SlashCommandBuilder()
-      .setName('juanplay')
-      .setDescription('🔥 Comando principal personalizado de DEVJUANCHO')
-      .addStringOption(playOption),
-
-    new SlashCommandBuilder()
-      .setName('buscar')
-      .setDescription('🔎 Muestra recomendados con botones para elegir canción')
-      .addStringOption(playOption),
-
-    new SlashCommandBuilder()
-      .setName('recomendados')
-      .setDescription('🎯 Recomendados bonitos para elegir rápido')
-      .addStringOption(playOption),
-
-    new SlashCommandBuilder().setName('similares').setDescription('✨ Recomienda canciones parecidas a la actual o última'),
-    new SlashCommandBuilder().setName('historial').setDescription('🕘 Muestra canciones reproducidas recientemente'),
-
-    new SlashCommandBuilder().setName('queue').setDescription('📜 Muestra la cola de música'),
-    new SlashCommandBuilder().setName('nowplaying').setDescription('💿 Muestra la canción actual'),
-    new SlashCommandBuilder().setName('skip').setDescription('⏭️ Salta la canción actual'),
-    new SlashCommandBuilder().setName('stop').setDescription('⏹️ Detiene la música y limpia la cola'),
-    new SlashCommandBuilder().setName('pause').setDescription('⏸️ Pausa la canción'),
-    new SlashCommandBuilder().setName('resume').setDescription('▶️ Reanuda la canción'),
-    new SlashCommandBuilder().setName('leave').setDescription('👋 Saca a JUANPLAY del canal de voz'),
-    new SlashCommandBuilder()
-      .setName('volume')
-      .setDescription('🔊 Cambia el volumen')
-      .addIntegerOption((option) => option.setName('numero').setDescription('Volumen 1 a 200').setRequired(true).setMinValue(1).setMaxValue(200)),
-    new SlashCommandBuilder().setName('testvoz').setDescription('🧪 Prueba conexión al canal de voz'),
-    new SlashCommandBuilder().setName('diagnostico').setDescription('🛠️ Revisa variables y estado del bot'),
-    new SlashCommandBuilder().setName('plataformas').setDescription('🌐 Plataformas y links compatibles'),
-    new SlashCommandBuilder().setName('setup').setDescription('⚙️ Muestra configuración recomendada'),
-    new SlashCommandBuilder().setName('creditos').setDescription('👑 Créditos de JUANPLAY'),
-    new SlashCommandBuilder().setName('help').setDescription('📘 Lista de comandos JUANPLAY'),
-    new SlashCommandBuilder().setName('ping').setDescription('🏓 Latencia del bot'),
-  ];
-}
+const commands = [
+  new SlashCommandBuilder()
+    .setName('play')
+    .setDescription('Pon música por nombre o link.')
+    .addStringOption((o) => o.setName('cancion').setDescription('Nombre, link de YouTube, SoundCloud, Spotify, Apple, Deezer o audio directo.').setRequired(true).setAutocomplete(true)),
+  new SlashCommandBuilder()
+    .setName('juanplay')
+    .setDescription('Comando personalizado de JUANPLAY para poner música.')
+    .addStringOption((o) => o.setName('cancion').setDescription('Nombre o link de la canción.').setRequired(true).setAutocomplete(true)),
+  new SlashCommandBuilder()
+    .setName('buscar')
+    .setDescription('Busca canciones y muestra botones privados para elegir.')
+    .addStringOption((o) => o.setName('texto').setDescription('Texto a buscar.').setRequired(true).setAutocomplete(true)),
+  new SlashCommandBuilder()
+    .setName('recomendados')
+    .setDescription('Muestra recomendaciones privadas sin spamear el canal.')
+    .addStringOption((o) => o.setName('base').setDescription('Canción/artista base opcional.').setRequired(false).setAutocomplete(true)),
+  new SlashCommandBuilder().setName('similares').setDescription('Recomendaciones privadas basadas en lo que está sonando o el historial.'),
+  new SlashCommandBuilder().setName('queue').setDescription('Muestra la cola en privado.'),
+  new SlashCommandBuilder().setName('nowplaying').setDescription('Muestra lo que suena ahora en privado.'),
+  new SlashCommandBuilder().setName('skip').setDescription('Salta la canción actual.'),
+  new SlashCommandBuilder().setName('stop').setDescription('Detiene la música y limpia la cola.'),
+  new SlashCommandBuilder().setName('pause').setDescription('Pausa la música.'),
+  new SlashCommandBuilder().setName('resume').setDescription('Continúa la música.'),
+  new SlashCommandBuilder().setName('leave').setDescription('Saca el bot del canal de voz.'),
+  new SlashCommandBuilder()
+    .setName('volume')
+    .setDescription('Cambia el volumen del bot.')
+    .addIntegerOption((o) => o.setName('nivel').setDescription('Volumen de 1 a 150.').setRequired(true).setMinValue(1).setMaxValue(150)),
+  new SlashCommandBuilder().setName('testvoz').setDescription('Prueba que el bot pueda entrar al canal de voz.'),
+  new SlashCommandBuilder().setName('diagnostico').setDescription('Revisa FFmpeg, yt-dlp, Opus, conexión y estado.'),
+  new SlashCommandBuilder().setName('perfil').setDescription('Texto recomendado para el perfil/descripción del bot.'),
+  new SlashCommandBuilder().setName('creditos').setDescription('Créditos oficiales de JUANPLAY.'),
+  new SlashCommandBuilder().setName('help').setDescription('Ayuda de JUANPLAY.'),
+  new SlashCommandBuilder().setName('ping').setDescription('Prueba rápida del bot.')
+];
 
 async function registerCommands() {
-  const rest = new REST({ version: '10' }).setToken(TOKEN);
-  const body = buildCommands().map((command) => command.toJSON());
-  if (GUILD_ID) {
-    await rest.put(Routes.applicationGuildCommands(client.user.id, GUILD_ID), { body });
-    console.log(`[JUANPLAY] Comandos slash registrados en el servidor: ${GUILD_ID}`);
+  const rest = new REST({ version: '10' }).setToken(CONFIG.token);
+  const body = commands.map((cmd) => cmd.toJSON());
+  if (CONFIG.guildId) {
+    await rest.put(Routes.applicationGuildCommands(client.user.id, CONFIG.guildId), { body });
+    console.log(`[JUANPLAY] Comandos registrados en servidor ${CONFIG.guildId}`);
   } else {
     await rest.put(Routes.applicationCommands(client.user.id), { body });
-    console.log('[JUANPLAY] Comandos slash globales registrados. Pueden tardar en aparecer.');
+    console.log('[JUANPLAY] Comandos globales registrados. Pueden tardar en aparecer.');
   }
 }
 
-client.once('clientReady', async () => {
-  console.log(`✅ JUANPLAY conectado como ${client.user.tag}`);
+client.once(Events.ClientReady, async () => {
+  console.log(`✅ ${CONFIG.brand} conectado como ${client.user.tag}`);
   console.log(`🔗 ID de la app/bot: ${client.user.id}`);
-  console.log('🎵 Modo público anti-spam: /help, /buscar, /testvoz o /juanplay.');
-  client.user.setActivity('JUANPLAY público • DEVJUANCHO', { type: ActivityType.Listening });
+  console.log(`🎧 Desarrollador: ${CONFIG.developer}`);
+  setIdlePresence();
   try {
     await registerCommands();
-    console.log('✅ Comandos slash listos. Reinvita con scopes bot + applications.commands si no aparecen.');
-  } catch (error) {
-    console.error('❌ No pude registrar comandos slash:', error);
+    console.log('✅ Comandos slash listos.');
+  } catch (err) {
+    console.error('[JUANPLAY] Error registrando comandos:', err);
   }
 });
 
-function buildQueueLines(q) {
-  const lines = [];
-  if (q.current) lines.push(`🎧 **Actual:** [${escapeMd(q.current.title)}](${q.current.url})${q.current.requestedById ? ` • <@${q.current.requestedById}>` : ''}`);
-  if (q.tracks.length) lines.push(q.tracks.slice(0, 10).map(trackLine).join('\n'));
-  if (q.tracks.length > 10) lines.push(`\n...y **${q.tracks.length - 10}** más.`);
-  return lines.join('\n\n');
-}
-
-function buildHistoryLines(q) {
-  if (!q.history.length) return 'Aún no hay historial. Reproduce algo con `/play`.';
-  return q.history.slice(0, 10).map((track, i) => `**${i + 1}.** [${escapeMd(track.title)}](${track.url}) — \`${track.duration || '??'}\``).join('\n');
-}
-
-function checkCooldown(interaction, commandName) {
-  if (!COMMAND_COOLDOWN_MS) return null;
-  const protectedCommands = new Set(['play', 'juanplay', 'buscar', 'recomendados', 'similares']);
-  if (!protectedCommands.has(commandName)) return null;
-
-  const key = `${interaction.guildId || 'dm'}:${interaction.user.id}:${commandName}`;
-  const now = Date.now();
-  const until = cooldowns.get(key) || 0;
-  if (until > now) {
-    return `Para que el bot esté listo para público y no haga spam, espera **${Math.ceil((until - now) / 1000)}s** antes de usar otra vez este comando.`;
-  }
-  cooldowns.set(key, now + COMMAND_COOLDOWN_MS);
-  return null;
-}
-
-client.on('interactionCreate', async (interaction) => {
+client.on(Events.InteractionCreate, async (interaction) => {
   try {
-    if (interaction.isAutocomplete()) return handleAutocomplete(interaction);
+    if (interaction.isAutocomplete()) {
+      const focused = interaction.options.getFocused(true);
+      const choices = await autocompleteVideos(focused.value);
+      return interaction.respond(choices.slice(0, 10)).catch(() => {});
+    }
+
     if (interaction.isButton()) return handleButton(interaction);
+
     if (!interaction.isChatInputCommand()) return;
 
-    const name = interaction.commandName;
-
-    const cooldownMessage = checkCooldown(interaction, name);
-    if (cooldownMessage) {
-      return interaction.reply({ embeds: [warnEmbed('Espera un momento', cooldownMessage, interaction)], ephemeral: true }).catch(() => {});
+    const { commandName } = interaction;
+    if (commandName === 'play' || commandName === 'juanplay') {
+      return handlePlay(interaction, interaction.options.getString('cancion', true));
     }
-
-    if (name === 'play' || name === 'juanplay') {
-      return handlePlay(interaction, interaction.options.getString('busqueda', true));
+    if (commandName === 'buscar') {
+      return handleSearch(interaction, interaction.options.getString('texto', true), 'Busca y elige en privado');
     }
-
-    if (name === 'buscar' || name === 'recomendados') return handleSearch(interaction);
-    if (name === 'similares') return handleSimilar(interaction);
-
-    if (name === 'ping') {
-      return interaction.reply({ embeds: [okEmbed('Pong', `Latencia: **${Math.round(client.ws.ping)} ms**`, interaction)], ephemeral: true });
+    if (commandName === 'recomendados' || commandName === 'similares') {
+      return handleRecommendations(interaction, interaction.options.getString?.('base') || '');
     }
-
-    if (name === 'help') return interaction.reply({ embeds: [helpEmbed()], ephemeral: true });
-    if (name === 'plataformas') return interaction.reply({ embeds: [platformsEmbed()], ephemeral: true });
-    if (name === 'creditos') return interaction.reply({ embeds: [creditsEmbed()], ephemeral: true });
-    if (name === 'setup') return interaction.reply({ embeds: [setupEmbed()], ephemeral: true });
-    if (name === 'diagnostico') return handleDiagnostico(interaction);
-    if (name === 'testvoz') return handleTestVoice(interaction);
-
-    const q = getQueue(interaction.guild.id);
-
-    if (name === 'queue') {
-      const lines = buildQueueLines(q);
-      return interaction.reply({ embeds: [musicEmbed('Cola JUANPLAY', lines || 'La cola está vacía. Usa `/play` o `/buscar`.', interaction)], ephemeral: true });
+    if (commandName === 'queue') {
+      const state = getState(interaction.guildId);
+      return interaction.reply({ embeds: [queueEmbed(state, interaction.user)], ephemeral: true });
     }
-
-    if (name === 'historial') {
-      return interaction.reply({ embeds: [musicEmbed('Historial reciente', buildHistoryLines(q), interaction)], ephemeral: true });
+    if (commandName === 'nowplaying') {
+      const state = getState(interaction.guildId);
+      return interaction.reply({ embeds: [nowPlayingEmbed(state)], ephemeral: true });
     }
-
-    if (name === 'nowplaying') {
-      if (!q.current) return interaction.reply({ embeds: [warnEmbed('Nada sonando', 'Usa `/play nombre o link` para empezar.', interaction)], ephemeral: true });
-      return interaction.reply({ embeds: [nowPlayingEmbed(q.current)], components: publicPanelRows(q), ephemeral: true });
+    if (commandName === 'pause') {
+      const state = getState(interaction.guildId);
+      state.player.pause();
+      await updatePanel(state, 'playing');
+      return interaction.reply({ content: '⏸️ Pausado.', ephemeral: true });
     }
-
-    if (name === 'skip') {
-      if (!q.current) return interaction.reply({ embeds: [warnEmbed('Sin canción', 'No hay nada para saltar.', interaction)], ephemeral: true });
-      q.suppressRecommendation = true;
-      q.player.stop(true);
-      return interaction.reply({ embeds: [okEmbed('Saltado', 'Pasando a la siguiente canción.', interaction)], ephemeral: true });
+    if (commandName === 'resume') {
+      const state = getState(interaction.guildId);
+      state.player.unpause();
+      await updatePanel(state, 'playing');
+      return interaction.reply({ content: '▶️ Siguiendo.', ephemeral: true });
     }
-
-    if (name === 'stop') {
-      q.suppressRecommendation = true;
-      q.tracks = [];
-      stopTrackProcess(q.current);
-      q.current = null;
-      q.player.stop(true);
-      return interaction.reply({ embeds: [okEmbed('Detenido', 'Música detenida y cola limpiada.', interaction)], ephemeral: true });
+    if (commandName === 'skip') {
+      const state = getState(interaction.guildId);
+      state.player.stop(true);
+      return interaction.reply({ content: '⏭️ Saltando.', ephemeral: true });
     }
-
-    if (name === 'pause') {
-      const ok = q.player.pause(true);
-      return interaction.reply({ embeds: [ok ? okEmbed('Pausado', 'La música quedó pausada.', interaction) : warnEmbed('No pude pausar', 'No hay música sonando.', interaction)], ephemeral: true });
+    if (commandName === 'stop') {
+      const state = getState(interaction.guildId);
+      state.queue = [];
+      state.player.stop(true);
+      if (state.connection) {
+        try { state.connection.destroy(); } catch {}
+        state.connection = null;
+      }
+      state.current = null;
+      setIdlePresence();
+      await updatePanel(state, 'ended');
+      return interaction.reply({ content: '🛑 Música detenida y cola limpiada.', ephemeral: true });
     }
-
-    if (name === 'resume') {
-      const ok = q.player.unpause();
-      return interaction.reply({ embeds: [ok ? okEmbed('Reanudado', 'La música sigue sonando.', interaction) : warnEmbed('No pude reanudar', 'No hay música pausada.', interaction)], ephemeral: true });
+    if (commandName === 'leave') {
+      const state = getState(interaction.guildId);
+      state.queue = [];
+      state.player.stop(true);
+      if (state.connection) {
+        try { state.connection.destroy(); } catch {}
+        state.connection = null;
+      }
+      state.current = null;
+      setIdlePresence();
+      return interaction.reply({ content: '👋 Salí del canal de voz.', ephemeral: true });
     }
-
-    if (name === 'volume') {
-      const num = interaction.options.getInteger('numero', true);
-      q.volume = Math.max(1, Math.min(200, num)) / 100;
-      if (q.player.state.resource?.volume) q.player.state.resource.volume.setVolume(q.volume);
-      return interaction.reply({ embeds: [okEmbed('Volumen actualizado', `Volumen: **${num}%**`, interaction)], ephemeral: true });
+    if (commandName === 'volume') {
+      const state = getState(interaction.guildId);
+      const level = interaction.options.getInteger('nivel', true);
+      state.volume = clamp(level, 1, 150);
+      const resource = state.player.state.resource;
+      resource?.volume?.setVolume(state.volume / 100);
+      await updatePanel(state, 'playing');
+      return interaction.reply({ content: `🔊 Volumen cambiado a ${state.volume}%.`, ephemeral: true });
     }
-
-    if (name === 'leave') {
-      q.suppressRecommendation = true;
-      q.tracks = [];
-      stopTrackProcess(q.current);
-      q.current = null;
-      q.player.stop(true);
-      try { q.connection?.destroy(); } catch (_) {}
-      q.connection = null;
-      return interaction.reply({ embeds: [okEmbed('Me fui del canal', 'JUANPLAY salió del canal de voz.', interaction)], ephemeral: true });
+    if (commandName === 'testvoz') {
+      await interaction.deferReply({ ephemeral: true });
+      try {
+        const state = await connectToVoice(interaction);
+        return interaction.editReply({ embeds: [baseEmbed('Prueba de voz correcta', `Entré al canal de voz y quedé en estado: **${state.connection.state.status}**.\nAhora prueba /play.`)] });
+      } catch (err) {
+        return interaction.editReply({ embeds: [baseEmbed('Falló la prueba de voz', cut(err.message || String(err), 500))] });
+      }
     }
-  } catch (error) {
-    console.error('[JUANPLAY] Error ejecutando comando:', error);
-    const embed = errEmbed('Ocurrió un error interno', buildPlaybackError(error));
-    if (interaction.deferred || interaction.replied) {
-      return interaction.editReply({ embeds: [embed], components: [] }).catch(() => {});
+    if (commandName === 'diagnostico') {
+      await interaction.deferReply({ ephemeral: true });
+      return interaction.editReply({ embeds: [await diagnosticsEmbed(interaction)] });
     }
-    return interaction.reply({ embeds: [embed], ephemeral: true }).catch(() => {});
+    if (commandName === 'perfil') {
+      const desc = `**Nombre recomendado:** ${CONFIG.brand}\n\n` +
+        `**Descripción / About Me:**\n` +
+        `🎵 ${CONFIG.brand} — música con comandos slash, búsqueda, cola, recomendados privados y panel limpio para servidores públicos.\n` +
+        `Desarrollador único: ${CONFIG.developer}.\n\n` +
+        `La descripción real del perfil se cambia en Discord Developer Portal → General Information / Bot. La actividad sí la cambia el código automáticamente con la canción actual.`;
+      return interaction.reply({ embeds: [baseEmbed('Perfil oficial de JUANPLAY', desc)], ephemeral: true });
+    }
+    if (commandName === 'creditos') {
+      return interaction.reply({ embeds: [baseEmbed('Créditos oficiales', `**${CONFIG.brand}**\nDesarrollador único: **${CONFIG.developer}**\nSistema de música, recomendaciones privadas, panel público limpio y actividad dinámica.`)], ephemeral: true });
+    }
+    if (commandName === 'help') {
+      const desc = `**Música**\n` +
+        '`/play` o `/juanplay` nombre/link\n' +
+        '`/buscar` resultados con botones privados\n' +
+        '`/recomendados` y `/similares` solo para ti\n\n' +
+        `**Control**\n` +
+        '`/pause`, `/resume`, `/skip`, `/stop`, `/leave`, `/volume`\n\n' +
+        `**Info**\n` +
+        '`/queue`, `/nowplaying`, `/diagnostico`, `/perfil`, `/creditos`\n\n' +
+        `Panel público sin spam + respuestas privadas. Desarrollador: **${CONFIG.developer}**.`;
+      return interaction.reply({ embeds: [baseEmbed('Ayuda de JUANPLAY', desc)], ephemeral: true });
+    }
+    if (commandName === 'ping') {
+      return interaction.reply({ content: `🏓 Pong • ${client.ws.ping}ms • ${CONFIG.brand} by ${CONFIG.developer}`, ephemeral: true });
+    }
+  } catch (err) {
+    console.error('[JUANPLAY] Error ejecutando interacción:', err);
+    const payload = { embeds: [baseEmbed('Error inesperado', cut(err.message || String(err), 500))], ephemeral: true };
+    if (interaction.isRepliable()) {
+      if (interaction.deferred || interaction.replied) await interaction.followUp(payload).catch(() => {});
+      else await interaction.reply(payload).catch(() => {});
+    }
   }
 });
 
-async function handleTestVoice(interaction) {
-  await interaction.deferReply({ ephemeral: true });
-  const q = getQueue(interaction.guild.id);
-  try {
-    const connection = await ensureVoice(interaction, q);
-    return interaction.editReply({ embeds: [okEmbed('Voz lista', `JUANPLAY conectó al canal de voz.\nEstado: **${connection.state.status}**`)] });
-  } catch (error) {
-    return interaction.editReply({ embeds: [errEmbed('No pude conectar a voz', buildPlaybackError(error))] });
+process.on('unhandledRejection', (err) => {
+  console.error('[JUANPLAY] Unhandled rejection:', err);
+});
+
+process.on('SIGTERM', () => {
+  for (const child of pendingProcesses) {
+    try { child.kill('SIGKILL'); } catch {}
   }
-}
+  client.destroy();
+  process.exit(0);
+});
 
-async function handleDiagnostico(interaction) {
-  const q = getQueue(interaction.guild.id);
-  const lines = [
-    `🤖 Bot: **${client.user.tag}**`,
-    `🧩 Node: **${process.version}**`,
-    `🎚️ FFmpeg: **${ffmpegPath ? 'incluido' : 'no detectado'}**`,
-    `🎙️ Opus: **${hasModule('opusscript') || hasModule('@discordjs/opus') ? 'instalado' : 'no instalado'}**`,
-    `🍪 YOUTUBE_COOKIE: **${cookieFile ? 'configurada' : 'no configurada'}**`,
-    `🏠 GUILD_ID: **${GUILD_ID ? GUILD_ID : 'no configurado, comandos globales'}**`,
-    `🔊 Volumen: **${Math.round(q.volume * 100)}%**`,
-    `📡 Voice timeout: **${VOICE_TIMEOUT_MS}ms**`,
-    `📌 Estado voz: **${q.connection?.state?.status || 'sin conexión'}**`,
-    `🎧 Actual: **${q.current ? escapeMd(q.current.title) : 'nada'}**`,
-    `📜 Cola: **${q.tracks.length}**`,
-    `✨ Auto recomendados: **${AUTO_RECOMMEND_AFTER_END ? 'activado' : 'apagado'}**`,
-    `🔒 Respuestas privadas: **${PRIVATE_COMMAND_RESPONSES ? 'activadas' : 'apagadas'}**`,
-    `🧼 Panel único público: **${PUBLIC_NOWPLAYING_PANEL ? 'activado' : 'apagado'}**`,
-    `📦 Límite cola: **${MAX_QUEUE_SIZE}**`,
-    `⏱️ Cooldown: **${COMMAND_COOLDOWN_MS}ms**`,
-    `🕘 Historial: **${q.history.length}**`,
-  ];
-  if (q.lastError) lines.push(`\nÚltimo error: \`${cut(q.lastError.message || q.lastError, 700)}\``);
-  return interaction.reply({ embeds: [musicEmbed('Diagnóstico JUANPLAY', lines.join('\n'))], ephemeral: true });
-}
-
-function helpEmbed() {
-  return musicEmbed('Comandos JUANPLAY', [
-    '`/play busqueda` — reproduce por nombre o link.',
-    '`/juanplay busqueda` — comando principal personalizado.',
-    '`/buscar busqueda` — muestra recomendados privados con botones.',
-    '`/recomendados busqueda` — recomendados privados anti-spam.',
-    '`/similares` — recomienda canciones parecidas en privado.',
-    '`/historial` — últimas canciones reproducidas.',
-    '`/queue` — cola privada.',
-    '`/nowplaying` — canción actual.',
-    '`/skip` `/stop` `/pause` `/resume` — controles.',
-    '`/volume numero` — volumen 1 a 200.',
-    '`/testvoz` — prueba conexión de voz.',
-    '`/diagnostico` — revisa variables/estado.',
-    '`/plataformas` — plataformas compatibles.',
-    '`/creditos` — créditos DEVJUANCHO.',
-  ].join('\n'));
-}
-
-function platformsEmbed() {
-  return musicEmbed('Plataformas compatibles', [
-    '✅ **YouTube** por nombre, link y playlist.',
-    '✅ **SoundCloud** por link.',
-    '✅ **Links directos** `.mp3`, `.m4a`, `.wav`, `.ogg`, `.flac`, `.webm`.',
-    '✅ **Spotify / Apple Music / Deezer**: toma el nombre del link y busca la canción en YouTube.',
-    '✅ Muchas páginas soportadas por **yt-dlp**.',
-    '',
-    '⚠️ Puede funcionar **sin cookie**. Si YouTube tira **429**, agrega `YOUTUBE_COOKIE` nueva en Railway.',
-  ].join('\n'));
-}
-
-function setupEmbed() {
-  return musicEmbed('Setup recomendado para Discord + Railway', [
-    '**OAuth2 scopes:** `bot` y `applications.commands`.',
-    '**Permisos Discord:** Ver canales, Enviar mensajes, Insertar enlaces, Leer historial, Usar comandos de barra diagonal, Conectarse, Hablar, Usar actividad de voz, Usar sonidos externos.',
-    '',
-    '**Variables Railway:**',
-    '`DISCORD_TOKEN` obligatorio.',
-    '`GUILD_ID` recomendado para comandos instantáneos.',
-    '`YOUTUBE_COOKIE` opcional: solo úsala si YouTube bloquea con 429.',
-    '`PRIVATE_COMMAND_RESPONSES=true` para que los comandos no spameen.',
-    '`PUBLIC_NOWPLAYING_PANEL=true` para usar un solo panel público editable.',
-    '`END_RECOMMENDATIONS_MODE=button` para recomendados privados por botón.',
-    '`MAX_QUEUE_SIZE=80` y `COMMAND_COOLDOWN_MS=2500` para modo público.',
-    '`VOICE_TIMEOUT_MS=120000` recomendado.',
-  ].join('\n'));
-}
-
-function creditsEmbed() {
-  return musicEmbed('Créditos oficiales', [
-    '👑 **Desarrollador único:** DEVJUANCHO',
-    '🎧 **Proyecto:** JUANPLAY Music Bot Público v9',
-    '🛡️ **Modo:** Anti-spam para servidor público',
-    '🔒 **Recomendaciones:** privadas para quien las solicita',
-    '',
-    'Diseño, organización, créditos y personalización oficial de **DEVJUANCHO**.',
-  ].join('\n'));
-}
-
-
-function startHealthServer() {
-  const port = process.env.PORT;
-  if (!port) return;
-  const server = http.createServer((req, res) => {
-    res.writeHead(200, { 'content-type': 'application/json' });
-    res.end(JSON.stringify({ ok: true, bot: 'JUANPLAY', version: '9.0.0', user: client.user?.tag || null }));
-  });
-  server.listen(port, () => console.log(`🌐 Health server activo en puerto ${port}`));
-}
-
-process.on('unhandledRejection', (error) => console.error('[JUANPLAY] Unhandled rejection:', error));
-process.on('uncaughtException', (error) => console.error('[JUANPLAY] Uncaught exception:', error));
-
-startHealthServer();
-client.login(TOKEN);
+client.login(CONFIG.token);

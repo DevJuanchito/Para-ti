@@ -1,24 +1,21 @@
 {
-  "name": "juanplay-devjuancho-definitivo-v8",
-  "version": "8.0.0",
-  "description": "JUANPLAY Music Bot definitivo v8 por DEVJUANCHO / JuanStudio. Diseño premium, usuario visible, botones, historial y recomendaciones automáticas al terminar canciones.",
+  "name": "juanplay-devjuancho-publico",
+  "version": "10.0.0",
+  "description": "JUANPLAY - Bot de música decorado para servidores públicos. Desarrollador: DEVJUANCHO.",
   "main": "index.js",
-  "type": "commonjs",
+  "type": "module",
   "scripts": {
     "start": "node index.js",
-    "check": "node --check index.js"
+    "dev": "node index.js"
   },
   "engines": {
     "node": ">=20.0.0"
   },
   "dependencies": {
-    "@discordjs/voice": "latest",
-    "discord.js": "latest",
-    "ffmpeg-static": "latest",
-    "libsodium-wrappers": "latest",
-    "opusscript": "latest",
-    "prism-media": "latest",
-    "youtube-dl-exec": "latest",
-    "yt-search": "latest"
+    "@discordjs/voice": "^0.18.0",
+    "discord.js": "^14.17.3",
+    "ffmpeg-static": "^5.2.0",
+    "opusscript": "^0.1.1",
+    "yt-search": "^2.13.1"
   }
 }

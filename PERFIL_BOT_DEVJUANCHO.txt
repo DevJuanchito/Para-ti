@@ -1,0 +1,12 @@
+NOMBRE RECOMENDADO:
+JUANPLAY
+
+DESCRIPCION / ABOUT ME:
+🎵 JUANPLAY — música con comandos slash, búsqueda, cola, recomendados privados y panel limpio para servidores públicos.
+Desarrollador único: DEVJUANCHO.
+Usa /play, /buscar, /recomendados y /help.
+
+ACTIVIDAD:
+El código cambia la actividad automáticamente.
+- En espera: JUANPLAY • /play • DEVJUANCHO
+- Reproduciendo: aparece el nombre de la canción actual.
