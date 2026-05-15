@@ -18,14 +18,14 @@ No usa música, no usa YouTube, no usa `yt-dlp`, no usa cookies y no necesita un
 - `/cola` muestra la cola TTS.
 - `/limpiarcola` vacía la cola sin detener el audio actual.
 - `/panel` muestra botones: Entrar, Salir, Detener, Limpiar cola, Ver cola.
-- `/diagnostico` muestra conexión, canal, cola, voz, Node.js, FFmpeg, ping y uptime.
+- `/diagnostico` muestra conexión, canal, cola, voz, Node.js, FFmpeg, motor TTS, dependencias de voz, ping y uptime.
 - `/help` muestra ayuda completa.
 
 ## 🧠 TTS usado
 
-Este proyecto usa `edge-tts-universal`, una librería gratuita que genera audio con voces neurales de Microsoft Edge TTS desde Node.js.
+Este proyecto usa `edge-tts-universal`, una librería gratuita que genera audio con voces neurales de Microsoft Edge TTS desde Node.js. Además incluye fallback con `google-tts-api` para que, si Edge TTS falla temporalmente, el bot intente generar el MP3 por otra ruta gratuita.
 
-No requiere API key ni variable ENV de pago.
+No requiere API key ni variable ENV de pago. Puedes controlar el motor con `TTS_PROVIDER=auto`, `edge` o `google`.
 
 Voces incluidas:
 
@@ -75,6 +75,7 @@ MAX_TEXT_LENGTH=250
 MAX_QUEUE_SIZE=50
 VOICE_TIMEOUT_MS=120000
 AUTO_TTS_ENABLED=false
+TTS_PROVIDER=auto
 PORT=3000
 ```
 
@@ -89,6 +90,7 @@ PORT=3000
 - `MAX_QUEUE_SIZE`: máximo de mensajes pendientes en cola.
 - `VOICE_TIMEOUT_MS`: tiempo para salir del canal si queda inactivo.
 - `AUTO_TTS_ENABLED`: valor base del modo automático.
+- `TTS_PROVIDER`: `auto` usa Edge TTS y fallback Google; `edge` fuerza Edge; `google` fuerza Google TTS.
 - `PORT`: puerto usado por el health server de Railway.
 
 ## 🚀 Instalación local
@@ -121,6 +123,32 @@ También puedes probar:
 /autotts canal:#general
 /autotts off
 ```
+
+
+## 🔧 Si el bot entra pero no habla
+
+Usa este orden:
+
+```txt
+/diagnostico
+/join
+/decir texto:hola mundo
+```
+
+Revisa en `/diagnostico`:
+
+- **Voz** debe decir `Conectado`.
+- **FFmpeg** debe aparecer detectado.
+- **Dependencias voz** debe mostrar `@discordjs/voice`, `prism-media` y `opusscript` disponibles.
+- **Motor TTS** debe decir `auto`, `edge` o `google`.
+
+Si Edge TTS no genera audio en Railway, cambia la variable:
+
+```env
+TTS_PROVIDER=google
+```
+
+Luego redeploy en Railway.
 
 ## 🚂 Subir a Railway
 

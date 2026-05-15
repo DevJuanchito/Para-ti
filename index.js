@@ -8,6 +8,7 @@ const path = require('node:path');
 const http = require('node:http');
 const crypto = require('node:crypto');
 const os = require('node:os');
+const childProcess = require('node:child_process');
 const ffmpegStatic = require('ffmpeg-static');
 
 if (ffmpegStatic) {
@@ -37,6 +38,7 @@ const {
   entersState,
   getVoiceConnection,
   joinVoiceChannel,
+  generateDependencyReport,
   NoSubscriberBehavior,
   StreamType,
   VoiceConnectionStatus,
@@ -53,31 +55,37 @@ const VOICES = {
   'es-LA-female': {
     label: 'Español latino femenino',
     shortName: 'es-MX-DaliaNeural',
+    googleLang: 'es',
     emoji: '🌸',
   },
   'es-LA-male': {
     label: 'Español latino masculino',
     shortName: 'es-MX-JorgeNeural',
+    googleLang: 'es',
     emoji: '🎙️',
   },
   'es-ES-female': {
     label: 'Español España femenino',
     shortName: 'es-ES-ElviraNeural',
+    googleLang: 'es',
     emoji: '✨',
   },
   'es-ES-male': {
     label: 'Español España masculino',
     shortName: 'es-ES-AlvaroNeural',
+    googleLang: 'es',
     emoji: '📢',
   },
   'en-US-female': {
     label: 'Inglés femenino',
     shortName: 'en-US-JennyNeural',
+    googleLang: 'en',
     emoji: '💬',
   },
   'en-US-male': {
     label: 'Inglés masculino',
     shortName: 'en-US-GuyNeural',
+    googleLang: 'en',
     emoji: '🔊',
   },
 };
@@ -124,6 +132,7 @@ const CONFIG = {
   maxQueueSize: parsePositiveInt(process.env.MAX_QUEUE_SIZE, 50),
   voiceTimeoutMs: parseMs(process.env.VOICE_TIMEOUT_MS, 120000),
   autoTtsEnabledByDefault: parseBool(process.env.AUTO_TTS_ENABLED, false),
+  ttsProvider: ['edge', 'google', 'auto'].includes(String(process.env.TTS_PROVIDER || '').toLowerCase()) ? String(process.env.TTS_PROVIDER || '').toLowerCase() : 'auto',
   port: parsePositiveInt(process.env.PORT, 3000),
 };
 
@@ -131,6 +140,7 @@ fs.mkdirSync(DATA_DIR, { recursive: true });
 fs.mkdirSync(TEMP_DIR, { recursive: true });
 
 let edgeTtsModulePromise = null;
+let googleTtsModulePromise = null;
 let persistedSettings = loadSettings();
 const guildStates = new Map();
 const cooldowns = new Map();
@@ -325,10 +335,37 @@ async function loadEdgeTTSModule() {
   return edgeTtsModulePromise;
 }
 
-async function synthesizeToFile(text, voiceKey) {
+async function loadGoogleTTSModule() {
+  if (!googleTtsModulePromise) {
+    googleTtsModulePromise = Promise.resolve(require('google-tts-api'));
+  }
+
+  return googleTtsModulePromise;
+}
+
+async function fetchBuffer(url) {
+  const response = await fetch(url, {
+    headers: {
+      'User-Agent': `${BOT_NAME}/1.0 (+Discord TTS Bot)`,
+    },
+  });
+
+  if (!response.ok) {
+    throw new Error(`HTTP ${response.status} al descargar audio TTS.`);
+  }
+
+  return Buffer.from(await response.arrayBuffer());
+}
+
+async function synthesizeWithEdge(text, voiceKey) {
   const voice = VOICES[resolveVoiceKey(voiceKey)];
   const mod = await loadEdgeTTSModule();
-  const EdgeTTS = mod.EdgeTTS || mod.UniversalEdgeTTS || mod.default?.EdgeTTS || mod.default?.UniversalEdgeTTS;
+  const EdgeTTS = mod.EdgeTTS
+    || mod.UniversalEdgeTTS
+    || mod.IsomorphicEdgeTTS
+    || mod.default?.EdgeTTS
+    || mod.default?.UniversalEdgeTTS
+    || mod.default?.IsomorphicEdgeTTS;
 
   if (!EdgeTTS) {
     throw new Error('No se encontró EdgeTTS en edge-tts-universal.');
@@ -341,10 +378,88 @@ async function synthesizeToFile(text, voiceKey) {
   });
 
   const result = await tts.synthesize();
+
+  if (!result?.audio?.arrayBuffer) {
+    throw new Error('edge-tts-universal no devolvió un Blob de audio válido.');
+  }
+
   const audioBuffer = Buffer.from(await result.audio.arrayBuffer());
+
+  if (audioBuffer.length < 100) {
+    throw new Error('edge-tts-universal devolvió audio vacío o demasiado pequeño.');
+  }
+
+  return audioBuffer;
+}
+
+async function synthesizeWithGoogleFallback(text, voiceKey) {
+  const voice = VOICES[resolveVoiceKey(voiceKey)];
+  const googleTTS = await loadGoogleTTSModule();
+  const options = {
+    lang: voice.googleLang || 'es',
+    slow: false,
+    host: 'https://translate.google.com',
+  };
+
+  const entries = typeof googleTTS.getAllAudioUrls === 'function'
+    ? googleTTS.getAllAudioUrls(text, options)
+    : [{ url: googleTTS.getAudioUrl(text.slice(0, 200), options) }];
+
+  const urls = entries
+    .map((entry) => (typeof entry === 'string' ? entry : entry?.url))
+    .filter(Boolean);
+
+  if (urls.length === 0) {
+    throw new Error('google-tts-api no devolvió URLs de audio.');
+  }
+
+  const parts = [];
+  for (const url of urls) {
+    const buffer = await fetchBuffer(url);
+    if (buffer.length > 100) parts.push(buffer);
+  }
+
+  const audioBuffer = Buffer.concat(parts);
+
+  if (audioBuffer.length < 100) {
+    throw new Error('google-tts-api devolvió audio vacío o demasiado pequeño.');
+  }
+
+  return audioBuffer;
+}
+
+async function synthesizeToFile(text, voiceKey) {
   const filePath = path.join(TEMP_DIR, `jv-tts-${Date.now()}-${crypto.randomUUID()}.mp3`);
+  const errors = [];
+  let audioBuffer = null;
+  let provider = null;
+
+  if (CONFIG.ttsProvider === 'edge' || CONFIG.ttsProvider === 'auto') {
+    try {
+      audioBuffer = await synthesizeWithEdge(text, voiceKey);
+      provider = 'edge-tts-universal';
+    } catch (error) {
+      errors.push(`Edge: ${error.message}`);
+      if (CONFIG.ttsProvider === 'edge') throw error;
+    }
+  }
+
+  if (!audioBuffer && (CONFIG.ttsProvider === 'google' || CONFIG.ttsProvider === 'auto')) {
+    try {
+      audioBuffer = await synthesizeWithGoogleFallback(text, voiceKey);
+      provider = 'google-tts-api';
+    } catch (error) {
+      errors.push(`Google fallback: ${error.message}`);
+      if (CONFIG.ttsProvider === 'google') throw error;
+    }
+  }
+
+  if (!audioBuffer) {
+    throw new Error(`No se pudo generar audio TTS. ${errors.join(' | ')}`);
+  }
+
   await fsp.writeFile(filePath, audioBuffer);
-  return filePath;
+  return { filePath, provider, bytes: audioBuffer.length };
 }
 
 async function cleanupTempFile(filePath) {
@@ -376,7 +491,7 @@ function ensurePlayer(guildId) {
 
   const player = createAudioPlayer({
     behaviors: {
-      noSubscriber: NoSubscriberBehavior.Pause,
+      noSubscriber: NoSubscriberBehavior.Play,
     },
   });
 
@@ -605,6 +720,19 @@ function clearGuildQueue(guildId) {
   return amount;
 }
 
+async function notifyTextChannel(channelId, embed) {
+  if (!channelId) return;
+
+  try {
+    const channel = await client.channels.fetch(channelId);
+    if (channel?.isTextBased?.()) {
+      await channel.send({ embeds: [embed] });
+    }
+  } catch (error) {
+    console.error('[NOTIFY] No se pudo enviar aviso al canal de texto:', error);
+  }
+}
+
 async function enqueueSpeech({ guild, member, text, voiceKey, channel, source = 'command' }) {
   const state = getState(guild.id);
   const cleanText = sanitizeSpeechText(text);
@@ -662,25 +790,38 @@ async function processQueue(guildId) {
   clearLeaveTimer(guildId);
 
   try {
-    item.filePath = await synthesizeToFile(item.text, item.voiceKey);
+    const synthesis = await synthesizeToFile(item.text, item.voiceKey);
+    item.filePath = synthesis.filePath;
+    item.provider = synthesis.provider;
+    item.bytes = synthesis.bytes;
 
     if (state.stopVersion !== stopVersionAtStart || state.current?.id !== item.id) {
       await cleanupTempFile(item.filePath);
       return;
     }
 
-    const resource = createAudioResource(item.filePath, {
+    const resource = createAudioResource(fs.createReadStream(item.filePath), {
       inputType: StreamType.Arbitrary,
       metadata: item,
     });
 
-    ensurePlayer(guildId).play(resource);
+    const player = ensurePlayer(guildId);
+    player.play(resource);
+
+    entersState(player, AudioPlayerStatus.Playing, 8000).catch((playError) => {
+      console.warn(`[PLAYER:${guildId}] El audio fue enviado, pero no se confirmó estado Playing:`, playError.message);
+    });
   } catch (error) {
     console.error('[TTS] Error generando o reproduciendo TTS:', error);
 
     if (item.filePath) {
       await cleanupTempFile(item.filePath);
     }
+
+    await notifyTextChannel(
+      item.channelId,
+      errorEmbed(`No pude leer ese texto en voz. Revisa permisos de voz, FFmpeg y logs de Railway.\n\nDetalle: \`${truncate(error.message, 180)}\``),
+    );
 
     state.current = null;
     state.playing = false;
@@ -695,7 +836,7 @@ function queueEmbed(guildId) {
   if (state.current) {
     fields.push({
       name: '▶️ Reproduciendo ahora',
-      value: `**${state.current.voiceLabel}**\n“${truncate(state.current.text, 180)}”\nPor: <@${state.current.authorId}>`,
+      value: `**${state.current.voiceLabel}**\n“${truncate(state.current.text, 180)}”\nPor: <@${state.current.authorId}>${state.current.provider ? `\nMotor: \`${state.current.provider}\`` : ''}`,
     });
   }
 
@@ -975,12 +1116,43 @@ async function handlePanel(interaction) {
   await interaction.reply({ embeds: [embed], components: panelComponents() });
 }
 
+function detectFfmpeg() {
+  if (ffmpegStatic && fs.existsSync(ffmpegStatic)) {
+    return `ffmpeg-static: ${ffmpegStatic}`;
+  }
+
+  try {
+    const result = childProcess.spawnSync('ffmpeg', ['-version'], { encoding: 'utf8' });
+    if (result.status === 0) {
+      const firstLine = String(result.stdout || '').split('\n')[0] || 'ffmpeg en PATH';
+      return firstLine;
+    }
+  } catch {
+    // Ignorar. El diagnóstico devolverá no detectado.
+  }
+
+  return 'No detectado';
+}
+
+function getDependencyReportShort() {
+  try {
+    return generateDependencyReport()
+      .split('\n')
+      .filter((line) => /@discordjs\/voice|prism-media|opusscript|FFmpeg|libopus|Encryption|sodium|tweetnacl|not found|found|version/i.test(line))
+      .slice(0, 18)
+      .join('\n')
+      .trim();
+  } catch (error) {
+    return `No se pudo generar reporte: ${error.message}`;
+  }
+}
+
 async function handleDiagnostic(interaction) {
   const state = getState(interaction.guildId);
   const connection = state.connection || getVoiceConnection(interaction.guildId);
   const channelId = connection?.joinConfig?.channelId;
   const voiceChannel = channelId ? interaction.guild.channels.cache.get(channelId) : null;
-  const ffmpegDetected = Boolean(process.env.FFMPEG_PATH && fs.existsSync(process.env.FFMPEG_PATH));
+  const ffmpegStatus = detectFfmpeg();
 
   const fields = [
     { name: '🔌 Voz', value: connection ? `Conectado (${connection.state.status})` : 'No conectado', inline: true },
@@ -988,10 +1160,12 @@ async function handleDiagnostic(interaction) {
     { name: '📋 Cola', value: `${state.queue.length} pendiente(s)`, inline: true },
     { name: '🎙️ Voz actual', value: getVoiceLabel(state.defaultVoice), inline: true },
     { name: '🟢 Node.js', value: process.version, inline: true },
-    { name: '🎛️ FFmpeg', value: ffmpegDetected ? 'Detectado por ffmpeg-static' : 'No detectado por ffmpeg-static', inline: true },
+    { name: '🎛️ FFmpeg', value: truncate(ffmpegStatus, 100), inline: true },
     { name: '📡 Ping', value: `${client.ws.ping}ms`, inline: true },
     { name: '⏱️ Uptime', value: formatDuration(process.uptime() * 1000), inline: true },
     { name: '🤖 AutoTTS', value: state.autoTtsEnabled && state.autoTtsChannelId ? `<#${state.autoTtsChannelId}>` : 'Desactivado', inline: true },
+    { name: '🗣️ Motor TTS', value: `\`${CONFIG.ttsProvider}\``, inline: true },
+    { name: '🧪 Dependencias voz', value: `\`\`\`txt\n${truncate(getDependencyReportShort(), 900)}\n\`\`\``, inline: false },
   ];
 
   await interaction.reply({ embeds: [infoEmbed('Diagnóstico de JUANVOICE', 'Estado actual del bot y del sistema.', fields)], ephemeral: true });
