@@ -1,514 +1,453 @@
-/*
-  🎧 JUANPLAY DEVJUANCHO PÚBLICO v9.2
-  Creado para DEVJUANCHO / JuanStudio
-  Basado en el código funcional v7 de DEVJUANCHO / JuanStudio.
-  Motor de reproducción conservado: yt-dlp directo, sin cookies obligatorias.
-*/
+'use strict';
 
-const http = require('node:http');
+require('dotenv').config();
+
+const fs = require('node:fs');
+const fsp = require('node:fs/promises');
 const path = require('node:path');
-const { PassThrough } = require('node:stream');
+const http = require('node:http');
+const crypto = require('node:crypto');
+const os = require('node:os');
+const ffmpegStatic = require('ffmpeg-static');
+
+if (ffmpegStatic) {
+  process.env.FFMPEG_PATH = ffmpegStatic;
+}
 
 const {
+  ActionRowBuilder,
+  ActivityType,
+  ButtonBuilder,
+  ButtonStyle,
+  ChannelType,
   Client,
+  EmbedBuilder,
+  Events,
   GatewayIntentBits,
+  PermissionsBitField,
   REST,
   Routes,
   SlashCommandBuilder,
-  EmbedBuilder,
-  ActionRowBuilder,
-  ButtonBuilder,
-  ButtonStyle,
-  PermissionFlagsBits,
-  ActivityType,
-  MessageFlags,
 } = require('discord.js');
 
 const {
-  joinVoiceChannel,
+  AudioPlayerStatus,
   createAudioPlayer,
   createAudioResource,
   entersState,
-  VoiceConnectionStatus,
-  AudioPlayerStatus,
+  getVoiceConnection,
+  joinVoiceChannel,
   NoSubscriberBehavior,
   StreamType,
-  getVoiceConnection,
+  VoiceConnectionStatus,
 } = require('@discordjs/voice');
 
-const ytdlp = require('youtube-dl-exec');
-const yts = require('yt-search');
-const ffmpegPath = require('ffmpeg-static');
+const BOT_NAME = 'JUANVOICE';
+const FOOTER = 'DEVJUANCHO • JuanStudio • JUANVOICE';
+const ROOT_DIR = __dirname;
+const DATA_DIR = path.join(ROOT_DIR, 'data');
+const TEMP_DIR = path.join(os.tmpdir(), 'juanvoice-tts');
+const SETTINGS_FILE = path.join(DATA_DIR, 'guild-settings.json');
 
-if (ffmpegPath) process.env.FFMPEG_PATH = process.env.FFMPEG_PATH || ffmpegPath;
+const VOICES = {
+  'es-LA-female': {
+    label: 'Español latino femenino',
+    shortName: 'es-MX-DaliaNeural',
+    emoji: '🌸',
+  },
+  'es-LA-male': {
+    label: 'Español latino masculino',
+    shortName: 'es-MX-JorgeNeural',
+    emoji: '🎙️',
+  },
+  'es-ES-female': {
+    label: 'Español España femenino',
+    shortName: 'es-ES-ElviraNeural',
+    emoji: '✨',
+  },
+  'es-ES-male': {
+    label: 'Español España masculino',
+    shortName: 'es-ES-AlvaroNeural',
+    emoji: '📢',
+  },
+  'en-US-female': {
+    label: 'Inglés femenino',
+    shortName: 'en-US-JennyNeural',
+    emoji: '💬',
+  },
+  'en-US-male': {
+    label: 'Inglés masculino',
+    shortName: 'en-US-GuyNeural',
+    emoji: '🔊',
+  },
+};
 
-const TOKEN = process.env.DISCORD_TOKEN || process.env.TOKEN;
-const GUILD_ID = process.env.GUILD_ID || '';
-const VOICE_TIMEOUT_MS = Number(process.env.VOICE_TIMEOUT_MS || 120000);
-const VOICE_SELF_DEAF = String(process.env.VOICE_SELF_DEAF || 'true').toLowerCase() !== 'false';
-const DEFAULT_VOLUME = Math.max(1, Math.min(200, Number(process.env.DEFAULT_VOLUME || 85))) / 100;
-const MAX_PLAYLIST_ITEMS = Math.max(1, Math.min(100, Number(process.env.MAX_PLAYLIST_ITEMS || 25)));
-const MAX_QUEUE_SIZE = Math.max(10, Math.min(1000, Number(process.env.MAX_QUEUE_SIZE || 500)));
-const COMMAND_COOLDOWN_MS = Math.max(0, Number(process.env.COMMAND_COOLDOWN_MS || 2500));
-const ANNOUNCE_NOW_PLAYING = String(process.env.ANNOUNCE_NOW_PLAYING || 'false').toLowerCase() === 'true';
-const QUEUE_ITEMS_PER_PAGE = Math.max(5, Math.min(20, Number(process.env.QUEUE_ITEMS_PER_PAGE || 10)));
-const BOT_COLOR = process.env.BOT_COLOR || '#ff2f7d';
-const SUCCESS_COLOR = process.env.SUCCESS_COLOR || '#2ecc71';
-const WARNING_COLOR = process.env.WARNING_COLOR || '#f1c40f';
-const ERROR_COLOR = process.env.ERROR_COLOR || '#ff2f7d';
-const BOT_NAME = process.env.BOT_NAME || 'JUANPLAY';
-const BOT_VERSION = '9.2.0';
-const BRAND = process.env.BOT_BRAND || 'DEVJUANCHO • JuanStudio';
-const BOT_INVITE_URL = process.env.BOT_INVITE_URL || '';
-const SUPPORT_SERVER = process.env.SUPPORT_SERVER || '';
-const WEBSITE_URL = process.env.WEBSITE_URL || '';
-const USER_AGENT = process.env.USER_AGENT || 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36';
-const YTDLP_PLAYER_CLIENTS = parseCsv(process.env.YTDLP_PLAYER_CLIENTS || 'default,android,ios,mweb,web');
-const YTDLP_FORCE_IPV4 = String(process.env.YTDLP_FORCE_IPV4 || 'true').toLowerCase() !== 'false';
-const YTDLP_STREAM_START_TIMEOUT_MS = Math.max(800, Math.min(10000, Number(process.env.YTDLP_STREAM_START_TIMEOUT_MS || 2500)));
-const SOUNDCLOUD_FALLBACK = String(process.env.SOUNDCLOUD_FALLBACK || 'true').toLowerCase() !== 'false';
-const EPHEMERAL = MessageFlags.Ephemeral;
+const VOICE_CHOICES = Object.entries(VOICES).map(([value, voice]) => ({
+  name: `${voice.emoji} ${voice.label}`,
+  value,
+}));
 
-if (!TOKEN) {
-  console.error('❌ Falta DISCORD_TOKEN en Railway → Variables.');
-  process.exit(1);
+class UserFacingError extends Error {
+  constructor(message) {
+    super(message);
+    this.name = 'UserFacingError';
+  }
 }
+
+function parseMs(value, fallback) {
+  const number = Number.parseInt(value, 10);
+  return Number.isFinite(number) && number >= 0 ? number : fallback;
+}
+
+function parsePositiveInt(value, fallback) {
+  const number = Number.parseInt(value, 10);
+  return Number.isFinite(number) && number > 0 ? number : fallback;
+}
+
+function parseBool(value, fallback = false) {
+  if (value === undefined || value === null || value === '') return fallback;
+  return ['1', 'true', 'yes', 'y', 'on', 'si', 'sí'].includes(String(value).trim().toLowerCase());
+}
+
+function normalizeHexColor(value, fallback) {
+  const raw = String(value || '').trim();
+  return /^#[0-9a-f]{6}$/i.test(raw) ? raw : fallback;
+}
+
+const CONFIG = {
+  token: process.env.DISCORD_TOKEN,
+  guildId: process.env.GUILD_ID,
+  defaultVoice: VOICES[process.env.DEFAULT_VOICE] ? process.env.DEFAULT_VOICE : 'es-LA-female',
+  botColor: normalizeHexColor(process.env.BOT_COLOR, '#ff2f7d'),
+  commandCooldownMs: parseMs(process.env.COMMAND_COOLDOWN_MS, 3000),
+  maxTextLength: parsePositiveInt(process.env.MAX_TEXT_LENGTH, 250),
+  maxQueueSize: parsePositiveInt(process.env.MAX_QUEUE_SIZE, 50),
+  voiceTimeoutMs: parseMs(process.env.VOICE_TIMEOUT_MS, 120000),
+  autoTtsEnabledByDefault: parseBool(process.env.AUTO_TTS_ENABLED, false),
+  port: parsePositiveInt(process.env.PORT, 3000),
+};
+
+fs.mkdirSync(DATA_DIR, { recursive: true });
+fs.mkdirSync(TEMP_DIR, { recursive: true });
+
+let edgeTtsModulePromise = null;
+let persistedSettings = loadSettings();
+const guildStates = new Map();
+const cooldowns = new Map();
 
 const client = new Client({
-  intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildVoiceStates],
+  intents: [
+    GatewayIntentBits.Guilds,
+    GatewayIntentBits.GuildVoiceStates,
+    GatewayIntentBits.GuildMessages,
+    GatewayIntentBits.MessageContent,
+  ],
 });
 
-const queues = new Map();
-const searchCache = new Map();
-const commandCooldowns = new Map();
-let lastPresenceText = '';
-let lastPresenceAt = 0;
-let pendingPresenceTimer = null;
+function loadSettings() {
+  try {
+    if (!fs.existsSync(SETTINGS_FILE)) return {};
+    const raw = fs.readFileSync(SETTINGS_FILE, 'utf8');
+    return JSON.parse(raw || '{}');
+  } catch (error) {
+    console.error('[SETTINGS] No se pudo leer guild-settings.json:', error);
+    return {};
+  }
+}
 
-setInterval(cleanSearchCache, 5 * 60 * 1000).unref();
-setInterval(cleanCommandCooldowns, 10 * 60 * 1000).unref();
+async function saveSettings() {
+  try {
+    await fsp.mkdir(DATA_DIR, { recursive: true });
+    await fsp.writeFile(SETTINGS_FILE, JSON.stringify(persistedSettings, null, 2), 'utf8');
+  } catch (error) {
+    console.error('[SETTINGS] No se pudo guardar guild-settings.json:', error);
+  }
+}
 
-function makeEmbed(title, description, color = BOT_COLOR) {
+function getState(guildId) {
+  if (!guildStates.has(guildId)) {
+    const saved = persistedSettings[guildId] || {};
+    guildStates.set(guildId, {
+      guildId,
+      player: null,
+      connection: null,
+      queue: [],
+      current: null,
+      playing: false,
+      defaultVoice: VOICES[saved.defaultVoice] ? saved.defaultVoice : CONFIG.defaultVoice,
+      autoTtsChannelId: saved.autoTtsChannelId || null,
+      autoTtsEnabled: typeof saved.autoTtsEnabled === 'boolean' ? saved.autoTtsEnabled : CONFIG.autoTtsEnabledByDefault,
+      leaveTimer: null,
+      stopVersion: 0,
+    });
+  }
+
+  return guildStates.get(guildId);
+}
+
+function persistGuildState(guildId) {
+  const state = getState(guildId);
+  persistedSettings[guildId] = {
+    defaultVoice: state.defaultVoice,
+    autoTtsChannelId: state.autoTtsChannelId,
+    autoTtsEnabled: state.autoTtsEnabled,
+  };
+  saveSettings().catch(console.error);
+}
+
+function createEmbed(title, description, options = {}) {
   const embed = new EmbedBuilder()
-    .setColor(color)
+    .setColor(options.color || CONFIG.botColor)
     .setTitle(title)
-    .setDescription(description || '')
-    .setFooter({ text: `${BRAND} • ${BOT_NAME} v${BOT_VERSION}` })
+    .setDescription(description || null)
+    .setFooter({ text: FOOTER })
     .setTimestamp();
 
-  const icon = client.user?.displayAvatarURL?.({ size: 128 });
-  if (icon) embed.setAuthor({ name: `${BOT_NAME} Music System`, iconURL: icon });
+  if (options.thumbnail) embed.setThumbnail(options.thumbnail);
+  if (options.fields) embed.addFields(options.fields);
+
   return embed;
 }
 
-function okEmbed(title, description) {
-  return makeEmbed(`✅ ${title}`, description, SUCCESS_COLOR);
+function successEmbed(title, description, fields = []) {
+  return createEmbed(`✅ ${title}`, description, { fields });
 }
 
-function warnEmbed(title, description) {
-  return makeEmbed(`⚠️ ${title}`, description, WARNING_COLOR);
+function errorEmbed(description) {
+  return createEmbed('❌ Error', description, { color: '#ff4d4d' });
 }
 
-function errEmbed(title, description) {
-  return makeEmbed(`❌ ${title}`, description, ERROR_COLOR);
+function infoEmbed(title, description, fields = []) {
+  return createEmbed(`💖 ${title}`, description, { fields });
 }
 
-function musicEmbed(title, description) {
-  return makeEmbed(`🎧 ${title}`, description, BOT_COLOR);
+function warnEmbed(title, description, fields = []) {
+  return createEmbed(`⚠️ ${title}`, description, { color: '#ffcc00', fields });
 }
 
-function premiumLine(label, value) {
-  return `**${label}:** ${value}`;
+function truncate(text, max = 120) {
+  const value = String(text || '');
+  return value.length > max ? `${value.slice(0, max - 3)}...` : value;
 }
 
-function nowPlayingEmbed(track, q = null) {
-  const elapsedMs = q?.player?.state?.playbackDuration || 0;
-  const elapsedSec = Math.floor(elapsedMs / 1000);
-  const totalSec = parseDurationSeconds(track.duration);
-  const bar = totalSec ? `\n${buildProgressBar(elapsedSec, totalSec)}\n\`${formatDuration(elapsedSec)} / ${track.duration}\`` : '';
-  const queueCount = q ? q.tracks.length : 0;
-  const requester = track.requestedBy ? `**${escapeMd(track.requestedBy)}**` : '**alguien**';
+function formatDuration(ms) {
+  const totalSeconds = Math.floor(ms / 1000);
+  const days = Math.floor(totalSeconds / 86400);
+  const hours = Math.floor((totalSeconds % 86400) / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = totalSeconds % 60;
 
-  const embed = musicEmbed(
-    `${BOT_NAME} está sonando`,
-    [
-      `╭─ **Canción actual**`,
-      `│ 💿 **[${escapeMd(track.title)}](${track.url})**`,
-      `│ 👤 Pedido por: ${requester}`,
-      `│ ⏱️ Duración: **${track.duration || 'desconocida'}**`,
-      `│ 🌐 Fuente: **${escapeMd(track.source || 'yt-dlp')}**`,
-      `│ 📜 En cola: **${queueCount}**`,
-      `╰─ ${bar || '✨ Usa los botones para controlar el reproductor.'}`,
-    ].join('\n')
-  );
-  if (track.thumbnail) embed.setThumbnail(track.thumbnail);
-  return embed;
+  const parts = [];
+  if (days) parts.push(`${days}d`);
+  if (hours) parts.push(`${hours}h`);
+  if (minutes) parts.push(`${minutes}m`);
+  parts.push(`${seconds}s`);
+  return parts.join(' ');
 }
 
-function queueEmbed(q, page = 0) {
-  const totalPages = getQueuePages(q);
-  const safePage = clamp(page, 0, Math.max(0, totalPages - 1));
-  const start = safePage * QUEUE_ITEMS_PER_PAGE;
-  const visible = q.tracks.slice(start, start + QUEUE_ITEMS_PER_PAGE);
-  const status = getPlayerStatusText(q);
-  const lines = [];
+function checkCooldown(userId) {
+  if (!CONFIG.commandCooldownMs) return;
 
-  lines.push(`╭─ **Panel de cola ${BOT_NAME}**`);
-  lines.push(`│ ${status}`);
-  lines.push(`│ 🔊 Volumen: **${Math.round(q.volume * 100)}%**`);
-  lines.push(`│ 📜 Próximas canciones: **${q.tracks.length}/${MAX_QUEUE_SIZE}**`);
-  lines.push(`╰─ Página **${safePage + 1}/${totalPages}**`);
-  lines.push('');
+  const now = Date.now();
+  const last = cooldowns.get(userId) || 0;
+  const remaining = last + CONFIG.commandCooldownMs - now;
 
-  if (q.current) {
-    lines.push(`🎧 **Actual:** [${escapeMd(q.current.title)}](${q.current.url})`);
-    lines.push('');
+  if (remaining > 0) {
+    throw new UserFacingError(`Espera **${Math.ceil(remaining / 1000)}s** antes de usar otro comando.`);
   }
 
-  if (!q.tracks.length) {
-    lines.push('✨ La cola está vacía. Usa `/play` o `/buscar` para agregar música.');
-  } else {
-    lines.push(visible.map((track, i) => trackLine(track, start + i + 1)).join('\n'));
-  }
-
-  const embed = musicEmbed('Cola completa', lines.join('\n'));
-  if (q.current?.thumbnail) embed.setThumbnail(q.current.thumbnail);
-  return embed;
+  cooldowns.set(userId, now);
 }
 
-function helpEmbed() {
-  return musicEmbed('Centro de comandos', [
-    '╭─ **Música**',
-    '│ `/play busqueda` — reproduce por nombre o link.',
-    '│ `/juanplay busqueda` — comando principal personalizado.',
-    '│ `/buscar busqueda` — recomendados con botones.',
-    '│ `/recomendados busqueda` — igual que buscar, con diseño bonito.',
-    '│ `/nowplaying` o `/np` — canción actual.',
-    '╰─ `/panel` — panel rápido con controles.',
-    '',
-    '╭─ **Cola y controles**',
-    '│ `/queue pagina` o `/cola pagina` — mira toda la cola por páginas.',
-    '│ `/clearqueue` o `/limpiarcola` — vacía la cola sin parar la canción actual.',
-    '│ `/skip` `/stop` `/pause` `/resume` — controles rápidos.',
-    '│ `/volume numero` — volumen 1 a 200.',
-    '╰─ `/leave` — saca el bot del canal de voz.',
-    '',
-    '╭─ **Bot público**',
-    '│ `/testvoz` — prueba conexión al canal de voz.',
-    '│ `/diagnostico` — revisa estado y variables.',
-    '│ `/plataformas` — links compatibles.',
-    '│ `/setup` — configuración recomendada.',
-    '│ `/invite` — enlace de invitación si está configurado.',
-    '╰─ `/creditos` — créditos DEVJUANCHO.',
-  ].join('\n'));
-}
-
-function platformsEmbed() {
-  return musicEmbed('Plataformas compatibles', [
-    '✅ **YouTube** por nombre, link y playlist.',
-    '✅ **SoundCloud** por link.',
-    '✅ **Links directos** `.mp3`, `.m4a`, `.wav`, `.ogg`, `.flac`, `.webm`.',
-    '✅ **Spotify / Apple Music / Deezer / Tidal**: toma el nombre del link y busca la canción en YouTube.',
-    '✅ Muchas páginas soportadas por **yt-dlp**.',
-    '',
-    '✅ Esta versión va **sin cookies obligatorias**, prueba varios clientes internos de YouTube y usa SoundCloud como respaldo automático.',
-  ].join('\n'));
-}
-
-function setupEmbed() {
-  return musicEmbed('Setup recomendado para Discord + Railway', [
-    '╭─ **OAuth2**',
-    '│ Scopes: `bot` y `applications.commands`.',
-    '│ Permisos: Ver canales, Enviar mensajes, Insertar enlaces, Leer historial, Usar comandos slash, Conectarse y Hablar.',
-    '╰─ Reinvita el bot si los comandos no aparecen.',
-    '',
-    '╭─ **Variables Railway**',
-    '│ `DISCORD_TOKEN` obligatorio.',
-    '│ `GUILD_ID` recomendado para comandos instantáneos.',
-    '│ `ANNOUNCE_NOW_PLAYING=false` evita spam automático por cada canción.',
-    '│ `COMMAND_COOLDOWN_MS=2500` evita spam de comandos.',
-    '│ `MAX_QUEUE_SIZE=500` protege servidores públicos.',
-    '│ `BOT_INVITE_URL` opcional para `/invite`.',
-    '╰─ No necesitas cookies para usar esta versión. Si YouTube bloquea la IP, el bot intenta SoundCloud/fallback automático.',
-    '',
-    '🎨 **Perfil del bot:** avatar, banner y descripción se cambian en Discord Developer Portal. Desde el código sí se actualiza la actividad dinámica.',
-  ].join('\n'));
-}
-
-function creditsEmbed() {
-  return musicEmbed('Créditos', [
-    '👑 **DEVJUANCHO**',
-    '🏗️ **JuanStudio**',
-    `🎧 **${BOT_NAME} Music Bot Público v${BOT_VERSION}**`,
-    '',
-    'Decorado, optimizado para público, con actividad dinámica, anti-spam y cola completa paginada.',
-  ].join('\n'));
-}
-
-function inviteEmbed() {
-  const lines = [];
-  if (BOT_INVITE_URL) lines.push(`🔗 **Invita el bot:** ${BOT_INVITE_URL}`);
-  else lines.push('⚠️ No hay enlace configurado. Agrega `BOT_INVITE_URL` en Railway para que `/invite` lo muestre.');
-  if (SUPPORT_SERVER) lines.push(`🛟 **Soporte:** ${SUPPORT_SERVER}`);
-  if (WEBSITE_URL) lines.push(`🌐 **Web:** ${WEBSITE_URL}`);
-  lines.push('', 'Permisos recomendados: `bot` + `applications.commands`.');
-  return musicEmbed(`Invitar ${BOT_NAME}`, lines.join('\n'));
-}
-
-function trackLine(track, index) {
-  const duration = track.duration || '??';
-  const requester = track.requestedBy ? ` • 👤 ${escapeMd(track.requestedBy)}` : '';
-  return `**${index}.** [${escapeMd(track.title)}](${track.url}) — \`${duration}\`${requester}`;
-}
-
-function playerControlsRow() {
-  return new ActionRowBuilder().addComponents(
-    new ButtonBuilder().setCustomId('jp_ctrl:pause').setEmoji('⏸️').setLabel('Pausar').setStyle(ButtonStyle.Secondary),
-    new ButtonBuilder().setCustomId('jp_ctrl:resume').setEmoji('▶️').setLabel('Seguir').setStyle(ButtonStyle.Success),
-    new ButtonBuilder().setCustomId('jp_ctrl:skip').setEmoji('⏭️').setLabel('Saltar').setStyle(ButtonStyle.Primary),
-    new ButtonBuilder().setCustomId('jp_ctrl:queue').setEmoji('📜').setLabel('Cola').setStyle(ButtonStyle.Secondary),
-    new ButtonBuilder().setCustomId('jp_ctrl:stop').setEmoji('⏹️').setLabel('Stop').setStyle(ButtonStyle.Danger)
-  );
-}
-
-function queueControlsRow(page, totalPages, queueLength) {
-  const safePage = clamp(page, 0, Math.max(0, totalPages - 1));
-  return new ActionRowBuilder().addComponents(
-    new ButtonBuilder()
-      .setCustomId(`jp_queue:${safePage}:prev`)
-      .setEmoji('⬅️')
-      .setLabel('Atrás')
-      .setStyle(ButtonStyle.Secondary)
-      .setDisabled(safePage <= 0),
-    new ButtonBuilder()
-      .setCustomId(`jp_queue:${safePage}:refresh`)
-      .setEmoji('🔄')
-      .setLabel('Actualizar')
-      .setStyle(ButtonStyle.Primary),
-    new ButtonBuilder()
-      .setCustomId(`jp_queue:${safePage}:next`)
-      .setEmoji('➡️')
-      .setLabel('Siguiente')
-      .setStyle(ButtonStyle.Secondary)
-      .setDisabled(safePage >= totalPages - 1),
-    new ButtonBuilder()
-      .setCustomId(`jp_queue:${safePage}:clear`)
-      .setEmoji('🧹')
-      .setLabel('Vaciar cola')
-      .setStyle(ButtonStyle.Danger)
-      .setDisabled(queueLength <= 0)
-  );
-}
-
-function queueComponents(q, page = 0) {
-  const totalPages = getQueuePages(q);
-  return [queueControlsRow(page, totalPages, q.tracks.length), playerControlsRow()];
-}
-
-function searchPickRows(results, id) {
-  const rows = [];
-  for (let row = 0; row < Math.ceil(results.length / 5); row++) {
-    const actionRow = new ActionRowBuilder();
-    for (let i = row * 5; i < Math.min(results.length, row * 5 + 5); i++) {
-      actionRow.addComponents(
-        new ButtonBuilder()
-          .setCustomId(`jp_pick:${id}:${i}`)
-          .setLabel(`${i + 1}`)
-          .setEmoji('▶️')
-          .setStyle(ButtonStyle.Primary)
-      );
+function cleanCooldowns() {
+  const now = Date.now();
+  for (const [userId, timestamp] of cooldowns.entries()) {
+    if (now - timestamp > CONFIG.commandCooldownMs * 4 + 60000) {
+      cooldowns.delete(userId);
     }
-    rows.push(actionRow);
   }
-  return rows;
 }
 
-function escapeMd(text) {
-  return String(text || '')
-    .replace(/\\/g, '\\\\')
-    .replace(/\*/g, '\\*')
-    .replace(/_/g, '\\_')
-    .replace(/~/g, '\\~')
-    .replace(/`/g, '\\`')
-    .replace(/\|/g, '\\|');
+function resolveVoiceKey(voiceKey, guildId) {
+  const state = guildId ? getState(guildId) : null;
+  const candidate = voiceKey || state?.defaultVoice || CONFIG.defaultVoice;
+  return VOICES[candidate] ? candidate : CONFIG.defaultVoice;
 }
 
-function parseCsv(value) {
-  return String(value || '')
-    .split(',')
-    .map((item) => item.trim().toLowerCase())
-    .filter(Boolean)
-    .filter((item, index, list) => list.indexOf(item) === index);
+function getVoiceLabel(voiceKey) {
+  const key = VOICES[voiceKey] ? voiceKey : CONFIG.defaultVoice;
+  const voice = VOICES[key];
+  return `${voice.emoji} ${voice.label}`;
 }
 
-function cleanInput(input) {
-  return String(input || '').trim().replace(/^<|>$/g, '').trim();
+function sanitizeSpeechText(rawText) {
+  const raw = String(rawText || '').trim();
+
+  if (!raw) {
+    throw new UserFacingError('El texto está vacío. Escribe algo para leerlo en voz alta.');
+  }
+
+  if (raw.length > CONFIG.maxTextLength) {
+    throw new UserFacingError(`Tu texto tiene **${raw.length}** caracteres. El máximo configurado es **${CONFIG.maxTextLength}**.`);
+  }
+
+  if (/@everyone|@here/i.test(raw)) {
+    throw new UserFacingError('Por seguridad, no puedo leer mensajes que contengan **@everyone** o **@here**.');
+  }
+
+  let text = raw
+    .replace(/```[\s\S]*?```/g, ' bloque de código ')
+    .replace(/`([^`]+)`/g, '$1')
+    .replace(/https?:\/\/\S+/gi, ' enlace ')
+    .replace(/<@!?\d+>/g, ' usuario ')
+    .replace(/<@&\d+>/g, ' rol ')
+    .replace(/<#\d+>/g, ' canal ')
+    .replace(/<a?:[a-zA-Z0-9_]+:\d+>/g, ' emoji ')
+    .replace(/:[a-zA-Z0-9_]+:/g, ' emoji ')
+    .replace(/[\u200B-\u200D\uFEFF]/g, '')
+    .replace(/[*_~>#|[\]{}()]/g, ' ')
+    .replace(/@/g, ' arroba ')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+  if (!text) {
+    throw new UserFacingError('Después de limpiar menciones y markdown, no queda texto válido para leer.');
+  }
+
+  return text;
 }
 
-function isUrl(input) {
-  return /^https?:\/\//i.test(cleanInput(input));
+async function loadEdgeTTSModule() {
+  if (!edgeTtsModulePromise) {
+    edgeTtsModulePromise = import('edge-tts-universal');
+  }
+
+  return edgeTtsModulePromise;
 }
 
-function isMusicServiceThatNeedsSearch(url) {
-  return /open\.spotify\.com|music\.apple\.com|deezer\.page\.link|deezer\.com|tidal\.com|music\.amazon\.|pandora\.com/i.test(url);
+async function synthesizeToFile(text, voiceKey) {
+  const voice = VOICES[resolveVoiceKey(voiceKey)];
+  const mod = await loadEdgeTTSModule();
+  const EdgeTTS = mod.EdgeTTS || mod.UniversalEdgeTTS || mod.default?.EdgeTTS || mod.default?.UniversalEdgeTTS;
+
+  if (!EdgeTTS) {
+    throw new Error('No se encontró EdgeTTS en edge-tts-universal.');
+  }
+
+  const tts = new EdgeTTS(text, voice.shortName, {
+    rate: '+0%',
+    volume: '+0%',
+    pitch: '+0Hz',
+  });
+
+  const result = await tts.synthesize();
+  const audioBuffer = Buffer.from(await result.audio.arrayBuffer());
+  const filePath = path.join(TEMP_DIR, `jv-tts-${Date.now()}-${crypto.randomUUID()}.mp3`);
+  await fsp.writeFile(filePath, audioBuffer);
+  return filePath;
 }
 
-function directAudioUrl(url) {
-  return /\.(mp3|m4a|wav|ogg|opus|flac|aac|webm)(\?|#|$)/i.test(url);
-}
-
-function hasModule(name) {
+async function cleanupTempFile(filePath) {
+  if (!filePath) return;
   try {
-    require.resolve(name);
-    return true;
-  } catch (_) {
-    return false;
+    await fsp.rm(filePath, { force: true });
+  } catch (error) {
+    console.error('[TEMP] No se pudo borrar audio temporal:', error);
   }
 }
 
-function youtubePlaylistUrl(url) {
-  return /[?&]list=/i.test(url) && /youtube\.com|youtu\.be/i.test(url);
-}
-
-function commonYtDlpFlags(extra = {}, clientName = 'default') {
-  // Motor igual al código que ya te funciona: yt-dlp directo, sin cookies obligatorias.
-  // v9.2 prueba varios clientes internos de YouTube antes de rendirse.
-  const flags = {
-    noWarnings: true,
-    noCheckCertificates: true,
-    preferFreeFormats: true,
-    addHeader: [
-      `user-agent:${USER_AGENT}`,
-      'referer:https://www.youtube.com/',
-      'accept-language:es-ES,es;q=0.9,en;q=0.8',
-    ],
-    retries: 5,
-    fragmentRetries: 5,
-    extractorRetries: 3,
-    socketTimeout: 20,
-    ...extra,
-  };
-
-  if (YTDLP_FORCE_IPV4) flags.forceIpv4 = true;
-
-  if (clientName && clientName !== 'default') {
-    flags.extractorArgs = [`youtube:player_client=${clientName}`];
+async function cleanupOldTempFiles() {
+  try {
+    const files = await fsp.readdir(TEMP_DIR);
+    await Promise.all(
+      files
+        .filter((file) => file.startsWith('jv-tts-') && file.endsWith('.mp3'))
+        .map((file) => cleanupTempFile(path.join(TEMP_DIR, file))),
+    );
+  } catch (error) {
+    console.error('[TEMP] No se pudo limpiar la carpeta temporal:', error);
   }
-
-  return flags;
 }
 
-function getYtDlpClientsFor(url) {
-  const text = String(url || '');
-  if (!/youtube\.com|youtu\.be/i.test(text)) return ['default'];
-  const list = YTDLP_PLAYER_CLIENTS.length ? YTDLP_PLAYER_CLIENTS : ['default', 'android', 'ios', 'mweb', 'web'];
-  return list.includes('default') ? list : ['default', ...list];
-}
+function ensurePlayer(guildId) {
+  const state = getState(guildId);
 
-async function runYtDlpJson(input, extra = {}) {
-  let lastError = null;
-  for (const clientName of getYtDlpClientsFor(input)) {
-    try {
-      return await ytdlp(input, commonYtDlpFlags(extra, clientName));
-    } catch (error) {
-      lastError = error;
-      const msg = error?.stderr || error?.message || String(error || '');
-      console.warn(`[JUANPLAY] yt-dlp JSON falló con cliente ${clientName}: ${cut(msg, 500)}`);
-      if (!/youtube\.com|youtu\.be|ytsearch/i.test(String(input))) break;
-    }
-  }
-  throw lastError || new Error('yt-dlp no devolvió datos');
-}
-
-function getQueue(guildId) {
-  let q = queues.get(guildId);
-  if (q) return q;
+  if (state.player) return state.player;
 
   const player = createAudioPlayer({
-    behaviors: { noSubscriber: NoSubscriberBehavior.Play },
+    behaviors: {
+      noSubscriber: NoSubscriberBehavior.Pause,
+    },
   });
 
-  q = {
-    guildId,
-    textChannel: null,
-    voiceChannelId: null,
-    connection: null,
-    player,
-    tracks: [],
-    current: null,
-    history: [],
-    volume: DEFAULT_VOLUME,
-    locked: false,
-    lastError: null,
-  };
+  player.on(AudioPlayerStatus.Idle, async () => {
+    const current = state.current;
+    state.current = null;
+    state.playing = false;
 
-  player.on(AudioPlayerStatus.Idle, () => {
-    if (q.current) q.history.unshift({ ...q.current, process: null });
-    if (q.history.length > 25) q.history.length = 25;
-    stopTrackProcess(q.current);
-    q.current = null;
-    refreshPresence();
-    setTimeout(() => playNext(guildId).catch(console.error), 350);
-  });
-
-  player.on('error', (error) => {
-    q.lastError = error;
-    console.error('[JUANPLAY] Error del reproductor:', error);
-    if (q.textChannel && ANNOUNCE_NOW_PLAYING) {
-      q.textChannel.send({
-        embeds: [errEmbed('Error reproduciendo', `Falló el stream actual. Paso a la siguiente canción.\n\n\`${cut(error.message || error, 900)}\``)],
-      }).catch(() => {});
+    if (current?.filePath) {
+      await cleanupTempFile(current.filePath);
     }
-    stopTrackProcess(q.current);
-    q.current = null;
-    refreshPresence();
-    setTimeout(() => playNext(guildId).catch(console.error), 750);
+
+    processQueue(guildId).catch((error) => console.error('[QUEUE] Error procesando cola:', error));
   });
 
-  queues.set(guildId, q);
-  return q;
+  player.on('error', async (error) => {
+    console.error(`[PLAYER:${guildId}]`, error);
+    const current = state.current;
+    state.current = null;
+    state.playing = false;
+
+    if (current?.filePath) {
+      await cleanupTempFile(current.filePath);
+    }
+
+    processQueue(guildId).catch((queueError) => console.error('[QUEUE] Error tras fallo del reproductor:', queueError));
+  });
+
+  state.player = player;
+  return player;
 }
 
-function stopTrackProcess(track) {
-  if (!track || !track.process) return;
-  try {
-    if (!track.process.killed) track.process.kill('SIGKILL');
-  } catch (_) {}
-  track.process = null;
-}
-
-async function ensureVoice(interaction, q) {
-  const member = interaction.member;
-  const voiceChannel = member?.voice?.channel;
-  if (!voiceChannel) throw new Error('Primero entra a un canal de voz.');
-
-  const permissions = voiceChannel.permissionsFor(interaction.guild.members.me);
-  if (!permissions?.has(PermissionFlagsBits.ViewChannel)) throw new Error('No tengo permiso **Ver canales** en ese canal de voz.');
-  if (!permissions?.has(PermissionFlagsBits.Connect)) throw new Error('No tengo permiso **Conectarse** en ese canal de voz.');
-  if (!permissions?.has(PermissionFlagsBits.Speak)) throw new Error('No tengo permiso **Hablar** en ese canal de voz.');
-
-  q.voiceChannelId = voiceChannel.id;
-  q.textChannel = interaction.channel;
-
-  const existing = getVoiceConnection(interaction.guild.id);
-  if (existing && existing.state.status !== VoiceConnectionStatus.Destroyed) {
-    q.connection = existing;
-    existing.subscribe(q.player);
-    if (existing.state.status === VoiceConnectionStatus.Ready) return existing;
-    await entersState(existing, VoiceConnectionStatus.Ready, VOICE_TIMEOUT_MS);
-    return existing;
+function clearLeaveTimer(guildId) {
+  const state = getState(guildId);
+  if (state.leaveTimer) {
+    clearTimeout(state.leaveTimer);
+    state.leaveTimer = null;
   }
+}
 
-  const connection = joinVoiceChannel({
-    channelId: voiceChannel.id,
-    guildId: interaction.guild.id,
-    adapterCreator: interaction.guild.voiceAdapterCreator,
-    selfDeaf: VOICE_SELF_DEAF,
-    selfMute: false,
-  });
+function scheduleVoiceTimeout(guildId) {
+  const state = getState(guildId);
+  clearLeaveTimer(guildId);
 
-  q.connection = connection;
-  connection.subscribe(q.player);
+  if (!CONFIG.voiceTimeoutMs) return;
+  if (state.current || state.queue.length > 0) return;
+
+  const timer = setTimeout(() => {
+    const latest = getState(guildId);
+    const connection = latest.connection || getVoiceConnection(guildId);
+
+    if (connection && !latest.current && latest.queue.length === 0) {
+      try {
+        connection.destroy();
+      } catch (error) {
+        console.error('[VOICE] Error destruyendo conexión por timeout:', error);
+      }
+
+      latest.connection = null;
+      latest.playing = false;
+      console.log(`[VOICE:${guildId}] Desconectado por inactividad.`);
+    }
+  }, CONFIG.voiceTimeoutMs);
+
+  if (typeof timer.unref === 'function') timer.unref();
+  state.leaveTimer = timer;
+}
+
+function wireConnection(connection, guildId) {
+  if (connection.__juanvoiceWired) return;
+  connection.__juanvoiceWired = true;
 
   connection.on(VoiceConnectionStatus.Disconnected, async () => {
     try {
@@ -516,1063 +455,779 @@ async function ensureVoice(interaction, q) {
         entersState(connection, VoiceConnectionStatus.Signalling, 5000),
         entersState(connection, VoiceConnectionStatus.Connecting, 5000),
       ]);
-    } catch (_) {
-      try { connection.destroy(); } catch (_) {}
-      if (q.connection === connection) q.connection = null;
+    } catch {
+      const state = getState(guildId);
+      try {
+        connection.destroy();
+      } catch (error) {
+        console.error('[VOICE] Error al destruir conexión desconectada:', error);
+      }
+      state.connection = null;
+      state.playing = false;
     }
   });
 
-  await entersState(connection, VoiceConnectionStatus.Ready, VOICE_TIMEOUT_MS);
+  connection.on(VoiceConnectionStatus.Destroyed, () => {
+    const state = getState(guildId);
+    state.connection = null;
+    state.playing = false;
+    clearLeaveTimer(guildId);
+  });
+
+  connection.on('error', (error) => {
+    console.error(`[VOICE:${guildId}]`, error);
+  });
+}
+
+async function assertVoicePermissions(channel) {
+  const me = channel.guild.members.me || (await channel.guild.members.fetchMe());
+  const permissions = channel.permissionsFor(me);
+
+  if (!permissions?.has(PermissionsBitField.Flags.Connect)) {
+    throw new UserFacingError(`No tengo permiso para **conectarme** a ${channel}.`);
+  }
+
+  if (!permissions?.has(PermissionsBitField.Flags.Speak)) {
+    throw new UserFacingError(`No tengo permiso para **hablar** en ${channel}.`);
+  }
+}
+
+async function connectToVoiceChannel(channel) {
+  if (!channel) {
+    throw new UserFacingError('Debes estar dentro de un canal de voz para usar este comando.');
+  }
+
+  await assertVoicePermissions(channel);
+
+  const guildId = channel.guild.id;
+  const state = getState(guildId);
+  const player = ensurePlayer(guildId);
+  const existing = state.connection || getVoiceConnection(guildId);
+
+  if (existing && existing.joinConfig?.channelId === channel.id && existing.state.status !== VoiceConnectionStatus.Destroyed) {
+    state.connection = existing;
+    existing.subscribe(player);
+    clearLeaveTimer(guildId);
+    return existing;
+  }
+
+  if (existing && existing.state.status !== VoiceConnectionStatus.Destroyed) {
+    try {
+      existing.destroy();
+    } catch (error) {
+      console.error('[VOICE] Error moviendo conexión:', error);
+    }
+  }
+
+  const connection = joinVoiceChannel({
+    channelId: channel.id,
+    guildId,
+    adapterCreator: channel.guild.voiceAdapterCreator,
+    selfDeaf: false,
+    selfMute: false,
+  });
+
+  state.connection = connection;
+  wireConnection(connection, guildId);
+  connection.subscribe(player);
+  clearLeaveTimer(guildId);
+
+  await entersState(connection, VoiceConnectionStatus.Ready, 30000);
   return connection;
 }
 
-function requireSameVoice(interaction, q) {
-  const memberVoiceId = interaction.member?.voice?.channelId;
-  if (!q.voiceChannelId) return null;
-  if (!memberVoiceId) return 'Debes estar en el canal de voz para usar este control.';
-  if (memberVoiceId !== q.voiceChannelId) return 'Debes estar en el mismo canal de voz que el bot para controlar la música.';
-  return null;
+async function connectToMemberVoice(member) {
+  const channel = member?.voice?.channel;
+  if (!channel) {
+    throw new UserFacingError('Debes estar dentro de un canal de voz para que pueda entrar y leer el texto.');
+  }
+
+  return connectToVoiceChannel(channel);
 }
 
-async function playNext(guildId) {
-  const q = getQueue(guildId);
-  if (q.locked) return;
-  if (q.current) return;
+async function disconnectGuild(guildId, clearQueue = true) {
+  const state = getState(guildId);
+  state.stopVersion += 1;
 
-  const next = q.tracks.shift();
-  if (!next) {
-    refreshPresence();
+  if (clearQueue) state.queue = [];
+
+  if (state.current?.filePath) {
+    await cleanupTempFile(state.current.filePath);
+  }
+
+  state.current = null;
+  state.playing = false;
+
+  if (state.player) {
+    try {
+      state.player.stop(true);
+    } catch (error) {
+      console.error('[PLAYER] Error deteniendo reproductor:', error);
+    }
+  }
+
+  const connection = state.connection || getVoiceConnection(guildId);
+  if (connection) {
+    try {
+      connection.destroy();
+    } catch (error) {
+      console.error('[VOICE] Error saliendo del canal:', error);
+    }
+  }
+
+  state.connection = null;
+  clearLeaveTimer(guildId);
+}
+
+async function stopGuildAudio(guildId) {
+  const state = getState(guildId);
+  state.stopVersion += 1;
+  state.queue = [];
+
+  if (state.current?.filePath) {
+    await cleanupTempFile(state.current.filePath);
+  }
+
+  state.current = null;
+  state.playing = false;
+
+  if (state.player) {
+    state.player.stop(true);
+  }
+
+  scheduleVoiceTimeout(guildId);
+}
+
+function clearGuildQueue(guildId) {
+  const state = getState(guildId);
+  const amount = state.queue.length;
+  state.queue = [];
+  return amount;
+}
+
+async function enqueueSpeech({ guild, member, text, voiceKey, channel, source = 'command' }) {
+  const state = getState(guild.id);
+  const cleanText = sanitizeSpeechText(text);
+
+  if (state.queue.length >= CONFIG.maxQueueSize) {
+    throw new UserFacingError(`La cola está llena. Máximo configurado: **${CONFIG.maxQueueSize}** mensajes.`);
+  }
+
+  const finalVoiceKey = resolveVoiceKey(voiceKey, guild.id);
+  const pendingBefore = state.queue.length + (state.current ? 1 : 0);
+  const item = {
+    id: crypto.randomUUID(),
+    guildId: guild.id,
+    channelId: channel?.id || null,
+    authorId: member?.id || null,
+    authorTag: member?.user?.tag || member?.user?.username || 'Usuario',
+    text: cleanText,
+    voiceKey: finalVoiceKey,
+    voiceLabel: getVoiceLabel(finalVoiceKey),
+    source,
+    createdAt: Date.now(),
+    filePath: null,
+  };
+
+  state.queue.push(item);
+  clearLeaveTimer(guild.id);
+  processQueue(guild.id).catch((error) => console.error('[QUEUE] Error al iniciar cola:', error));
+
+  return {
+    item,
+    position: pendingBefore + 1,
+  };
+}
+
+async function processQueue(guildId) {
+  const state = getState(guildId);
+  if (state.playing || state.current) return;
+
+  const connection = state.connection || getVoiceConnection(guildId);
+  if (!connection || connection.state.status === VoiceConnectionStatus.Destroyed) {
+    state.connection = null;
+    state.playing = false;
     return;
   }
 
-  q.locked = true;
-  q.current = next;
+  if (state.queue.length === 0) {
+    scheduleVoiceTimeout(guildId);
+    return;
+  }
+
+  const item = state.queue.shift();
+  const stopVersionAtStart = state.stopVersion;
+  state.current = item;
+  state.playing = true;
+  clearLeaveTimer(guildId);
 
   try {
-    if (!q.connection || q.connection.state.status === VoiceConnectionStatus.Destroyed) {
-      if (!q.voiceChannelId) throw new Error('No hay canal de voz guardado. Usa /play desde un canal de voz.');
-      const channel = await client.channels.fetch(q.voiceChannelId);
-      if (!channel) throw new Error('No encontré el canal de voz.');
-      q.connection = joinVoiceChannel({
-        channelId: channel.id,
-        guildId,
-        adapterCreator: channel.guild.voiceAdapterCreator,
-        selfDeaf: VOICE_SELF_DEAF,
-        selfMute: false,
-      });
-      q.connection.subscribe(q.player);
-      await entersState(q.connection, VoiceConnectionStatus.Ready, VOICE_TIMEOUT_MS);
-    }
+    item.filePath = await synthesizeToFile(item.text, item.voiceKey);
 
-    const resource = await createYtDlpAudioResource(next);
-    if (resource.volume) resource.volume.setVolume(q.volume);
-    next.startedAt = Date.now();
-    q.player.play(resource);
-    refreshPresence();
-
-    if (q.textChannel && ANNOUNCE_NOW_PLAYING) {
-      q.textChannel.send({ embeds: [nowPlayingEmbed(next, q)], components: [playerControlsRow()] }).catch(() => {});
-    }
-  } catch (error) {
-    q.lastError = error;
-    console.error('[JUANPLAY] No pude iniciar canción:', error);
-
-    const recovered = await recoverBlockedYouTubeTrack(q, next, error).catch((recoverError) => {
-      console.warn('[JUANPLAY] No pude buscar alternativa automática:', recoverError.message);
-      return false;
-    });
-
-    stopTrackProcess(next);
-    q.current = null;
-    q.locked = false;
-    refreshPresence();
-
-    if (recovered) {
-      setTimeout(() => playNext(guildId).catch(console.error), 350);
+    if (state.stopVersion !== stopVersionAtStart || state.current?.id !== item.id) {
+      await cleanupTempFile(item.filePath);
       return;
     }
 
-    if (q.textChannel) {
-      q.textChannel.send({
-        embeds: [errEmbed('No pude reproducir esa canción', buildPlaybackError(error))],
-      }).catch(() => {});
-    }
-    setTimeout(() => playNext(guildId).catch(console.error), 800);
-    return;
-  }
-
-  q.locked = false;
-}
-
-function buildPlaybackError(error) {
-  const message = String(error?.message || error || 'Error desconocido');
-  if (isYouTubeBlockedError(error)) {
-    return 'YouTube bloqueó ese video con verificación anti-bot.\n\n✅ No puse cookies. El bot intenta buscar una alternativa automática por el nombre de la canción. Si todas fallan, prueba escribir **el nombre de la canción** en vez de pegar ese link, usa SoundCloud o un link directo `.mp3/.m4a/.wav`.';
-  }
-  if (/429|Too Many Requests/i.test(message)) {
-    return 'YouTube devolvió **429 / Too Many Requests**. No puse cookies. Prueba otra canción, otro link, SoundCloud o un link directo de audio.';
-  }
-  if (/signalling|aborted|VoiceConnection|timed out|Ready/i.test(message)) {
-    return `No pude conectar a Discord Voice.\n\nRevisa permisos del canal: **Ver canales, Conectarse y Hablar**.\nSi estás en Railway y queda en \`signalling\`, el hosting puede estar bloqueando Discord Voice/UDP.\n\nDetalle: \`${cut(message, 500)}\``;
-  }
-  return `Detalle: \`${cut(message, 900)}\``;
-}
-
-function isYouTubeBlockedError(error) {
-  const message = String(error?.stderr || error?.message || error || '');
-  return /Sign in to confirm|not a bot|cookies-from-browser|authentication|confirm you.?re not a bot/i.test(message);
-}
-
-function getYouTubeId(url) {
-  const text = String(url || '');
-  try {
-    const parsed = new URL(text);
-    if (/youtu\.be$/i.test(parsed.hostname)) return parsed.pathname.replace(/^\//, '').split('/')[0] || null;
-    if (/youtube\.com$/i.test(parsed.hostname) || /youtube\.com$/i.test(parsed.hostname.replace(/^www\./, ''))) {
-      return parsed.searchParams.get('v') || null;
-    }
-  } catch (_) {}
-  const match = text.match(/(?:v=|youtu\.be\/|shorts\/)([a-zA-Z0-9_-]{6,})/);
-  return match?.[1] || null;
-}
-
-async function recoverBlockedYouTubeTrack(q, failedTrack, error) {
-  if (!isYouTubeBlockedError(error)) return false;
-  if (!failedTrack || failedTrack._autoRecovered) return false;
-
-  const originalId = getYouTubeId(failedTrack.url);
-  const query = cleanSearchText(failedTrack.title || failedTrack.searchQuery || failedTrack.url || '');
-  if (!query || isUrl(query)) return false;
-
-  const soundCloudResults = await searchSoundCloud(query, 5).catch(() => []);
-  let alternative = soundCloudResults.find((track) => track.url);
-
-  if (!alternative) {
-    const results = await searchYouTube(query, 8);
-    alternative = results.find((track) => {
-      const id = getYouTubeId(track.url);
-      return track.url && (!originalId || id !== originalId);
-    });
-  }
-
-  if (!alternative) return false;
-
-  alternative.requestedBy = failedTrack.requestedBy;
-  alternative.requestedById = failedTrack.requestedById;
-  alternative._autoRecovered = true;
-  alternative.title = alternative.title || failedTrack.title;
-  q.tracks.unshift(alternative);
-
-  if (q.textChannel) {
-    const embed = warnEmbed(
-      'YouTube bloqueó ese video',
-      [
-        'No puse cookies ni cambié tu ENV.',
-        '',
-        `🎧 Video bloqueado: **${escapeMd(failedTrack.title || 'canción anterior')}**`,
-        `🔁 Intentaré una alternativa automática (${escapeMd(alternative.source || 'fallback')}): **[${escapeMd(alternative.title)}](${alternative.url})**`,
-      ].join('\n')
-    );
-    if (alternative.thumbnail) embed.setThumbnail(alternative.thumbnail);
-    q.textChannel.send({ embeds: [embed] }).catch(() => {});
-  }
-
-  return true;
-}
-
-async function createYtDlpAudioResource(track) {
-  let lastError = null;
-  const clients = getYtDlpClientsFor(track.url);
-
-  for (const clientName of clients) {
-    const flags = commonYtDlpFlags({
-      output: '-',
-      format: 'bestaudio[ext=webm][acodec=opus]/bestaudio[acodec=opus]/bestaudio/bestaudio*/best',
-      noPlaylist: true,
-      quiet: true,
-    }, clientName);
-
-    const proc = ytdlp.exec(track.url, flags, {
-      windowsHide: true,
-      maxBuffer: 1024 * 1024 * 50,
+    const resource = createAudioResource(item.filePath, {
+      inputType: StreamType.Arbitrary,
+      metadata: item,
     });
 
-    track.process = proc;
-    track.ytdlpClient = clientName;
-
-    try {
-      const stream = await waitForYtDlpStream(proc, clientName);
-      return createAudioResource(stream, {
-        inputType: StreamType.Arbitrary,
-        inlineVolume: true,
-        metadata: track,
-      });
-    } catch (error) {
-      lastError = error;
-      const msg = error?.stderr || error?.message || String(error || '');
-      console.warn(`[JUANPLAY] Reintento yt-dlp falló con cliente ${clientName}: ${cut(msg, 500)}`);
-      try {
-        if (!proc.killed) proc.kill('SIGKILL');
-      } catch (_) {}
-      track.process = null;
-    }
-  }
-
-  throw lastError || new Error('yt-dlp no pudo abrir stream de audio');
-}
-
-function waitForYtDlpStream(proc, clientName = 'default') {
-  const pass = new PassThrough();
-  let stderr = '';
-  let settled = false;
-  let closed = false;
-
-  proc.stdout?.pipe(pass);
-
-  return new Promise((resolve, reject) => {
-    const finishResolve = () => {
-      if (settled) return;
-      settled = true;
-      resolve(pass);
-    };
-
-    const finishReject = (error) => {
-      if (settled) return;
-      settled = true;
-      try { pass.destroy(); } catch (_) {}
-      reject(error);
-    };
-
-    const timer = setTimeout(() => {
-      if (!closed) finishResolve();
-    }, YTDLP_STREAM_START_TIMEOUT_MS);
-    timer.unref?.();
-
-    proc.stdout?.once('readable', finishResolve);
-
-    proc.stderr?.on('data', (chunk) => {
-      stderr += chunk.toString();
-      if (stderr.length > 4000) stderr = stderr.slice(-4000);
-    });
-
-    proc.on('close', (code) => {
-      closed = true;
-      clearTimeout(timer);
-      if (code && code !== 0) {
-        const detail = stderr || `yt-dlp cerró con código ${code}`;
-        console.warn(`[JUANPLAY] yt-dlp cerró con código ${code} usando cliente ${clientName}: ${cut(detail, 700)}`);
-        finishReject(new Error(detail));
-        return;
-      }
-      finishResolve();
-    });
-
-    proc.on('error', (error) => {
-      clearTimeout(timer);
-      console.warn('[JUANPLAY] Error lanzando yt-dlp:', error.message);
-      finishReject(error);
-    });
-
-    if (typeof proc.catch === 'function') {
-      proc.catch((error) => {
-        const msg = error?.stderr || error?.message || String(error || '');
-        if (msg) console.warn(`[JUANPLAY] yt-dlp finalizó con error controlado: ${cut(msg, 700)}`);
-        if (!settled) finishReject(new Error(msg || 'yt-dlp falló'));
-      });
-    }
-  });
-}
-
-async function resolveInput(input, limit = 1) {
-  const query = cleanInput(input);
-  if (!query) return [];
-
-  if (isUrl(query)) {
-    if (isMusicServiceThatNeedsSearch(query)) {
-      const metaQuery = await queryFromMusicServiceLink(query);
-      return searchYouTube(metaQuery || query, limit);
-    }
-
-    if (youtubePlaylistUrl(query)) {
-      const list = await readPlaylist(query, Math.min(MAX_PLAYLIST_ITEMS, limit || MAX_PLAYLIST_ITEMS));
-      if (list.length) return list;
-    }
-
-    const info = await readUrlInfo(query).catch((error) => {
-      console.warn('[JUANPLAY] No pude leer link con yt-dlp, intento buscar por título:', error.message);
-      return null;
-    });
-
-    if (info) {
-      if (Array.isArray(info.entries) && info.entries.length) {
-        return info.entries.slice(0, Math.min(MAX_PLAYLIST_ITEMS, limit || MAX_PLAYLIST_ITEMS)).map(normalizeInfo).filter(Boolean);
-      }
-      const normalized = normalizeInfo(info, query);
-      if (normalized) return [normalized];
-    }
-
-    const metaQuery = await queryFromHtml(query);
-    if (metaQuery && !directAudioUrl(query)) return searchYouTube(metaQuery, limit);
-
-    if (directAudioUrl(query)) {
-      return [{
-        title: path.basename(new URL(query).pathname) || 'Audio directo',
-        url: query,
-        duration: 'directo',
-        thumbnail: null,
-        source: 'audio directo',
-      }];
-    }
-
-    throw new Error('No pude leer ese link. Prueba otro link o escribe el nombre de la canción.');
-  }
-
-  return searchYouTube(query, limit);
-}
-
-async function readUrlInfo(url) {
-  return runYtDlpJson(url, {
-    dumpSingleJson: true,
-    skipDownload: true,
-    noPlaylist: false,
-    playlistEnd: MAX_PLAYLIST_ITEMS,
-    quiet: true,
-  });
-}
-
-async function readPlaylist(url, limit) {
-  const data = await runYtDlpJson(url, {
-    dumpSingleJson: true,
-    skipDownload: true,
-    flatPlaylist: true,
-    yesPlaylist: true,
-    playlistEnd: limit,
-    quiet: true,
-  }).catch((error) => {
-    console.warn('[JUANPLAY] Error leyendo playlist:', error.message);
-    return null;
-  });
-  if (!data?.entries?.length) return [];
-  return data.entries.slice(0, limit).map(normalizeInfo).filter(Boolean);
-}
-
-function normalizeInfo(info, fallbackUrl = null) {
-  if (!info) return null;
-  const id = info.id || info.url;
-  let url = info.webpage_url || info.original_url || fallbackUrl || info.url;
-  if (!/^https?:\/\//i.test(String(url || '')) && id && /youtube|ytsearch/i.test(String(info.extractor || info.ie_key || ''))) {
-    url = `https://www.youtube.com/watch?v=${id}`;
-  }
-  if (!/^https?:\/\//i.test(String(url || ''))) return null;
-
-  return {
-    title: info.title || info.fulltitle || info.alt_title || 'Canción sin título',
-    url,
-    duration: formatDuration(info.duration) || info.duration_string || info.timestamp || 'desconocida',
-    thumbnail: info.thumbnail || (Array.isArray(info.thumbnails) ? info.thumbnails.at(-1)?.url : null),
-    source: info.extractor_key || info.extractor || info.ie_key || 'yt-dlp',
-  };
-}
-
-async function searchYouTube(query, limit = 1) {
-  const clean = cleanSearchText(query);
-  if (!clean) return [];
-
-  const fast = await searchYouTubeFast(clean, limit).catch(() => []);
-  if (fast.length) return fast;
-
-  const data = await runYtDlpJson(`ytsearch${limit}:${clean}`, {
-    dumpSingleJson: true,
-    skipDownload: true,
-    flatPlaylist: true,
-    quiet: true,
-  }).catch((error) => {
-    console.warn('[JUANPLAY] Error buscando con yt-dlp:', error.message);
-    return null;
-  });
-
-  if (!data?.entries?.length) return [];
-  return data.entries.map(normalizeInfo).filter(Boolean).slice(0, limit);
-}
-
-async function searchSoundCloud(query, limit = 5) {
-  if (!SOUNDCLOUD_FALLBACK) return [];
-  const clean = cleanSearchText(query);
-  if (!clean) return [];
-
-  const data = await ytdlp(`scsearch${limit}:${clean}`, {
-    noWarnings: true,
-    noCheckCertificates: true,
-    preferFreeFormats: true,
-    dumpSingleJson: true,
-    skipDownload: true,
-    flatPlaylist: true,
-    quiet: true,
-    retries: 3,
-    socketTimeout: 20,
-  }).catch((error) => {
-    console.warn('[JUANPLAY] Error buscando en SoundCloud:', error.message);
-    return null;
-  });
-
-  if (!data?.entries?.length) return [];
-  return data.entries.map((info) => {
-    const track = normalizeInfo(info);
-    if (track) track.source = 'SoundCloud';
-    return track;
-  }).filter(Boolean).slice(0, limit);
-}
-
-async function searchYouTubeFast(query, limit = 10) {
-  const result = await withTimeout(yts.search(query), 5500);
-  return (result?.videos || []).slice(0, limit).map((v) => ({
-    title: v.title,
-    url: v.url,
-    duration: v.timestamp || formatDuration(v.seconds),
-    thumbnail: v.thumbnail,
-    source: 'YouTube',
-  })).filter((v) => v.title && v.url);
-}
-
-async function queryFromMusicServiceLink(url) {
-  const htmlTitle = await queryFromHtml(url).catch(() => null);
-  if (htmlTitle) return htmlTitle;
-  return null;
-}
-
-async function queryFromHtml(url) {
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 8000);
-  try {
-    const res = await fetch(url, {
-      signal: controller.signal,
-      headers: { 'user-agent': USER_AGENT, 'accept-language': 'es-ES,es;q=0.9,en;q=0.8' },
-    });
-    const html = await res.text();
-    const ogTitle = matchMeta(html, 'property', 'og:title') || matchMeta(html, 'name', 'twitter:title') || matchTitle(html);
-    const artist = matchMeta(html, 'property', 'music:musician') || matchMeta(html, 'name', 'music:musician');
-    const text = cleanSearchText(`${ogTitle || ''} ${artist || ''}`);
-    return text || null;
-  } catch (_) {
-    return null;
-  } finally {
-    clearTimeout(timeout);
-  }
-}
-
-function matchMeta(html, attr, key) {
-  const re = new RegExp(`<meta[^>]+${attr}=["']${escapeRegex(key)}["'][^>]+content=["']([^"']+)["'][^>]*>`, 'i');
-  const re2 = new RegExp(`<meta[^>]+content=["']([^"']+)["'][^>]+${attr}=["']${escapeRegex(key)}["'][^>]*>`, 'i');
-  return decodeHtml((html.match(re)?.[1] || html.match(re2)?.[1] || '').trim());
-}
-
-function matchTitle(html) {
-  return decodeHtml((html.match(/<title[^>]*>([^<]+)<\/title>/i)?.[1] || '').trim());
-}
-
-function cleanSearchText(text) {
-  return decodeHtml(String(text || ''))
-    .replace(/\s+/g, ' ')
-    .replace(/\s*[-|–—]\s*(Spotify|Apple Music|Deezer|TIDAL|YouTube Music|Official Music Video|Official Video|Lyrics|Letra).*$/i, '')
-    .replace(/\((Official|Video Oficial|Lyrics|Letra|Audio|Visualizer)[^)]*\)/ig, '')
-    .replace(/\[[^\]]*(Official|Lyrics|Letra|Audio|Visualizer)[^\]]*\]/ig, '')
-    .trim();
-}
-
-function decodeHtml(str) {
-  return String(str || '')
-    .replace(/&amp;/g, '&')
-    .replace(/&quot;/g, '"')
-    .replace(/&#39;/g, "'")
-    .replace(/&lt;/g, '<')
-    .replace(/&gt;/g, '>')
-    .replace(/&nbsp;/g, ' ');
-}
-
-function escapeRegex(str) {
-  return String(str).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-}
-
-function parseDurationSeconds(value) {
-  const raw = String(value || '').trim();
-  if (!raw || /desconocida|directo|live/i.test(raw)) return null;
-  if (/^\d+(\.\d+)?$/.test(raw)) return Math.round(Number(raw));
-  const parts = raw.split(':').map((n) => Number(n));
-  if (!parts.length || parts.some((n) => Number.isNaN(n))) return null;
-  if (parts.length === 3) return parts[0] * 3600 + parts[1] * 60 + parts[2];
-  if (parts.length === 2) return parts[0] * 60 + parts[1];
-  return null;
-}
-
-function formatDuration(seconds) {
-  if (seconds === null || seconds === undefined || Number.isNaN(Number(seconds))) return null;
-  const s = Math.max(0, Math.round(Number(seconds)));
-  const h = Math.floor(s / 3600);
-  const m = Math.floor((s % 3600) / 60);
-  const sec = s % 60;
-  if (h) return `${h}:${String(m).padStart(2, '0')}:${String(sec).padStart(2, '0')}`;
-  return `${m}:${String(sec).padStart(2, '0')}`;
-}
-
-function buildProgressBar(elapsed, total) {
-  if (!total || total <= 0) return '';
-  const size = 14;
-  const safeElapsed = Math.max(0, Math.min(total, elapsed));
-  const filled = Math.max(0, Math.min(size, Math.round((safeElapsed / total) * size)));
-  return `${'▰'.repeat(filled)}${'▱'.repeat(size - filled)}`;
-}
-
-function cut(text, max = 1000) {
-  const s = String(text || '');
-  return s.length > max ? `${s.slice(0, max - 3)}...` : s;
-}
-
-function clamp(number, min, max) {
-  return Math.max(min, Math.min(max, Number(number) || 0));
-}
-
-function withTimeout(promise, ms) {
-  return Promise.race([
-    promise,
-    new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), ms)),
-  ]);
-}
-
-function getQueuePages(q) {
-  return Math.max(1, Math.ceil(q.tracks.length / QUEUE_ITEMS_PER_PAGE));
-}
-
-function getPlayerStatusText(q) {
-  const status = q.player.state.status;
-  if (status === AudioPlayerStatus.Playing) return '🟢 Estado: **Reproduciendo**';
-  if (status === AudioPlayerStatus.Paused) return '🟡 Estado: **Pausado**';
-  if (status === AudioPlayerStatus.Buffering) return '🔵 Estado: **Cargando audio**';
-  if (status === AudioPlayerStatus.AutoPaused) return '🟠 Estado: **Auto-pausado**';
-  return '⚪ Estado: **En espera**';
-}
-
-function getActiveQueue() {
-  for (const q of queues.values()) {
-    if (q.current) return q;
-  }
-  return null;
-}
-
-function refreshPresence(force = false) {
-  if (!client.user) return;
-  const active = getActiveQueue();
-  const paused = active?.player?.state?.status === AudioPlayerStatus.Paused;
-  const text = active?.current
-    ? `${paused ? '⏸️' : '🎶'} ${cut(active.current.title, 95)}`
-    : `${BOT_NAME} • /play /buscar`;
-
-  if (!force && text === lastPresenceText) return;
-
-  const now = Date.now();
-  const apply = () => {
-    try {
-      client.user.setActivity(text, { type: ActivityType.Listening });
-      lastPresenceText = text;
-      lastPresenceAt = Date.now();
-    } catch (error) {
-      console.warn('[JUANPLAY] No pude actualizar actividad:', error.message);
-    }
-  };
-
-  if (force || now - lastPresenceAt > 12000) {
-    clearTimeout(pendingPresenceTimer);
-    pendingPresenceTimer = null;
-    apply();
-  } else {
-    clearTimeout(pendingPresenceTimer);
-    pendingPresenceTimer = setTimeout(apply, 12000 - (now - lastPresenceAt));
-  }
-}
-
-function checkCommandCooldown(interaction) {
-  if (!COMMAND_COOLDOWN_MS) return 0;
-  const exempt = new Set(['queue', 'cola', 'nowplaying', 'np', 'diagnostico', 'help', 'ping']);
-  if (exempt.has(interaction.commandName)) return 0;
-  const key = `${interaction.guildId || 'dm'}:${interaction.user.id}:${interaction.commandName}`;
-  const now = Date.now();
-  const last = commandCooldowns.get(key) || 0;
-  const remaining = COMMAND_COOLDOWN_MS - (now - last);
-  if (remaining > 0) return remaining;
-  commandCooldowns.set(key, now);
-  return 0;
-}
-
-function cleanCommandCooldowns() {
-  const now = Date.now();
-  for (const [key, time] of commandCooldowns.entries()) {
-    if (now - time > 30 * 60 * 1000) commandCooldowns.delete(key);
-  }
-}
-
-async function handlePlay(interaction, query, fromButtonTrack = null) {
-  await interaction.deferReply().catch(() => {});
-  const q = getQueue(interaction.guild.id);
-
-  try {
-    await ensureVoice(interaction, q);
-
-    let tracks;
-    if (fromButtonTrack) {
-      tracks = [fromButtonTrack];
-    } else {
-      tracks = await resolveInput(query, youtubePlaylistUrl(cleanInput(query)) ? MAX_PLAYLIST_ITEMS : 1);
-    }
-
-    if (!tracks.length) {
-      return interaction.editReply({ embeds: [errEmbed('Sin resultados', 'No encontré esa canción. Prueba otro nombre o un link directo.')] });
-    }
-
-    const availableSlots = Math.max(0, MAX_QUEUE_SIZE - q.tracks.length);
-    if (tracks.length > availableSlots) {
-      tracks = tracks.slice(0, availableSlots);
-      if (!tracks.length) {
-        return interaction.editReply({ embeds: [warnEmbed('Cola llena', `La cola llegó al límite de **${MAX_QUEUE_SIZE}** canciones. Usa \`/clearqueue\` o espera que avance.`)] });
-      }
-    }
-
-    for (const track of tracks) {
-      track.requestedBy = interaction.user.username;
-      track.requestedById = interaction.user.id;
-      q.tracks.push(track);
-    }
-
-    const first = tracks[0];
-    const description = tracks.length === 1
-      ? [
-        '╭─ **Agregada a la cola**',
-        `│ 💿 **[${escapeMd(first.title)}](${first.url})**`,
-        `│ 👤 Pedido por: **${escapeMd(interaction.user.username)}**`,
-        `│ ⏱️ ${first.duration || 'desconocida'} • 🌐 ${first.source || 'YouTube'}`,
-        `╰─ 📜 Posición: **${q.current ? q.tracks.length : 'reproduciendo ahora'}**`,
-      ].join('\n')
-      : [
-        `╭─ **Playlist agregada**`,
-        `│ Agregué **${tracks.length} canciones** a la cola.`,
-        `│ Primera: **[${escapeMd(first.title)}](${first.url})**`,
-        `╰─ Límite actual: **${MAX_QUEUE_SIZE}** canciones.`,
-      ].join('\n');
-
-    const embed = musicEmbed('Música agregada', description);
-    if (first.thumbnail) embed.setThumbnail(first.thumbnail);
-
-    await interaction.editReply({ embeds: [embed], components: [playerControlsRow()] });
-
-    if (!q.current && q.player.state.status !== AudioPlayerStatus.Playing && q.player.state.status !== AudioPlayerStatus.Paused) {
-      await playNext(interaction.guild.id);
-    }
+    ensurePlayer(guildId).play(resource);
   } catch (error) {
-    console.error('[JUANPLAY] Error en handlePlay:', error);
-    const embed = errEmbed('No pude usar /play', buildPlaybackError(error));
-    if (interaction.deferred || interaction.replied) await interaction.editReply({ embeds: [embed], components: [] }).catch(() => {});
-    else await interaction.reply({ embeds: [embed], flags: EPHEMERAL }).catch(() => {});
+    console.error('[TTS] Error generando o reproduciendo TTS:', error);
+
+    if (item.filePath) {
+      await cleanupTempFile(item.filePath);
+    }
+
+    state.current = null;
+    state.playing = false;
+    processQueue(guildId).catch((queueError) => console.error('[QUEUE] Error continuando cola:', queueError));
   }
 }
 
-async function handleSearch(interaction) {
-  const query = interaction.options.getString('busqueda', true);
-  await interaction.deferReply();
-  const results = await searchYouTube(query, 10);
-  if (!results.length) return interaction.editReply({ embeds: [errEmbed('Sin recomendados', 'No encontré resultados para esa búsqueda.')] });
+function queueEmbed(guildId) {
+  const state = getState(guildId);
+  const fields = [];
 
-  const id = `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
-  searchCache.set(id, { createdAt: Date.now(), results });
+  if (state.current) {
+    fields.push({
+      name: '▶️ Reproduciendo ahora',
+      value: `**${state.current.voiceLabel}**\n“${truncate(state.current.text, 180)}”\nPor: <@${state.current.authorId}>`,
+    });
+  }
 
-  const embed = musicEmbed('Recomendados premium', [
-    `✨ Resultados para: **${escapeMd(query)}**`,
-    '',
-    results.map(trackLine).join('\n'),
-    '',
-    'Toca un botón para agregar la canción a la cola.',
-  ].join('\n'));
-  if (results[0]?.thumbnail) embed.setThumbnail(results[0].thumbnail);
+  if (state.queue.length > 0) {
+    const list = state.queue
+      .slice(0, 10)
+      .map((item, index) => `**${index + 1}.** ${item.voiceLabel} — “${truncate(item.text, 80)}”`)
+      .join('\n');
 
-  return interaction.editReply({ embeds: [embed], components: searchPickRows(results, id) });
+    fields.push({
+      name: `📋 Pendientes (${state.queue.length})`,
+      value: state.queue.length > 10 ? `${list}\n...y ${state.queue.length - 10} más.` : list,
+    });
+  }
+
+  if (fields.length === 0) {
+    fields.push({ name: '📭 Cola vacía', value: 'No hay mensajes TTS pendientes.' });
+  }
+
+  return infoEmbed('Cola de JUANVOICE', 'Estado actual de los mensajes por leer.', fields);
 }
 
-async function handleAutocomplete(interaction) {
-  const focused = interaction.options.getFocused(true);
-  if (focused.name !== 'busqueda') return interaction.respond([]).catch(() => {});
-
-  const query = cleanInput(focused.value);
-  if (!query || query.length < 2 || isUrl(query)) {
-    return interaction.respond([
-      { name: 'Pega un link o escribe una canción', value: query || 'Paulo Londra No Puedo' },
-    ]).catch(() => {});
-  }
-
-  try {
-    const results = await withTimeout(searchYouTubeFast(query, 10), 2400);
-    const choices = results.slice(0, 10).map((track) => ({
-      name: cut(`🎵 ${track.title} • ${track.duration || '??'}`, 100),
-      value: cut(track.title, 100),
-    }));
-    return interaction.respond(choices.length ? choices : [{ name: `Buscar: ${cut(query, 90)}`, value: cut(query, 100) }]).catch(() => {});
-  } catch (_) {
-    return interaction.respond([{ name: `Buscar: ${cut(query, 90)}`, value: cut(query, 100) }]).catch(() => {});
-  }
-}
-
-async function handleButton(interaction) {
-  if (interaction.customId.startsWith('jp_pick:')) return handlePickButton(interaction);
-  if (interaction.customId.startsWith('jp_ctrl:')) return handleControlButton(interaction);
-  if (interaction.customId.startsWith('jp_queue:')) return handleQueueButton(interaction);
-}
-
-async function handlePickButton(interaction) {
-  const [, id, indexRaw] = interaction.customId.split(':');
-  const cached = searchCache.get(id);
-  const index = Number(indexRaw);
-  const track = cached?.results?.[index];
-  if (!track) return interaction.reply({ embeds: [errEmbed('Botón expirado', 'Haz `/buscar` otra vez para generar recomendados nuevos.')], flags: EPHEMERAL });
-  await handlePlay(interaction, track.title, { ...track });
-}
-
-async function handleControlButton(interaction) {
-  const [, action] = interaction.customId.split(':');
-  const q = getQueue(interaction.guild.id);
-
-  if (action === 'queue') {
-    return interaction.reply({ embeds: [queueEmbed(q, 0)], components: queueComponents(q, 0), flags: EPHEMERAL });
-  }
-
-  const sameVoiceError = requireSameVoice(interaction, q);
-  if (sameVoiceError) return interaction.reply({ embeds: [warnEmbed('Control protegido', sameVoiceError)], flags: EPHEMERAL });
-
-  if (action === 'pause') {
-    const ok = q.player.pause(true);
-    refreshPresence(true);
-    return interaction.reply({ embeds: [ok ? okEmbed('Pausado', 'La música quedó pausada.') : warnEmbed('No pude pausar', 'No hay música sonando.')], flags: EPHEMERAL });
-  }
-
-  if (action === 'resume') {
-    const ok = q.player.unpause();
-    refreshPresence(true);
-    return interaction.reply({ embeds: [ok ? okEmbed('Reanudado', 'La música sigue sonando.') : warnEmbed('No pude reanudar', 'No hay música pausada.')], flags: EPHEMERAL });
-  }
-
-  if (action === 'skip') {
-    if (!q.current) return interaction.reply({ embeds: [warnEmbed('Sin canción', 'No hay nada para saltar.')], flags: EPHEMERAL });
-    q.player.stop(true);
-    return interaction.reply({ embeds: [okEmbed('Saltado', 'Pasando a la siguiente canción.')], flags: EPHEMERAL });
-  }
-
-  if (action === 'stop') {
-    q.tracks = [];
-    stopTrackProcess(q.current);
-    q.current = null;
-    q.player.stop(true);
-    refreshPresence(true);
-    return interaction.reply({ embeds: [okEmbed('Detenido', 'Música detenida y cola limpiada.')], flags: EPHEMERAL });
-  }
-}
-
-async function handleQueueButton(interaction) {
-  const [, pageRaw, action] = interaction.customId.split(':');
-  const q = getQueue(interaction.guild.id);
-  let page = clamp(Number(pageRaw) || 0, 0, getQueuePages(q) - 1);
-
-  if (action === 'clear') {
-    const sameVoiceError = requireSameVoice(interaction, q);
-    if (sameVoiceError) return interaction.reply({ embeds: [warnEmbed('Control protegido', sameVoiceError)], flags: EPHEMERAL });
-    q.tracks = [];
-    page = 0;
-  } else if (action === 'next') {
-    page += 1;
-  } else if (action === 'prev') {
-    page -= 1;
-  }
-
-  page = clamp(page, 0, getQueuePages(q) - 1);
-  const title = action === 'clear' ? 'Cola vaciada' : 'Cola completa';
-  const embed = queueEmbed(q, page).setTitle(`🎧 ${title}`);
-  return interaction.update({ embeds: [embed], components: queueComponents(q, page) }).catch(() => {
-    return interaction.reply({ embeds: [embed], components: queueComponents(q, page), flags: EPHEMERAL });
-  });
-}
-
-function cleanSearchCache() {
-  const now = Date.now();
-  for (const [id, data] of searchCache.entries()) {
-    if (now - data.createdAt > 15 * 60 * 1000) searchCache.delete(id);
-  }
+function panelComponents() {
+  return [
+    new ActionRowBuilder().addComponents(
+      new ButtonBuilder().setCustomId('jv_join').setLabel('Entrar').setEmoji('🔊').setStyle(ButtonStyle.Success),
+      new ButtonBuilder().setCustomId('jv_leave').setLabel('Salir').setEmoji('👋').setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder().setCustomId('jv_stop').setLabel('Detener').setEmoji('⏹️').setStyle(ButtonStyle.Danger),
+      new ButtonBuilder().setCustomId('jv_clear').setLabel('Limpiar cola').setEmoji('🧹').setStyle(ButtonStyle.Primary),
+      new ButtonBuilder().setCustomId('jv_queue').setLabel('Ver cola').setEmoji('📋').setStyle(ButtonStyle.Secondary),
+    ),
+  ];
 }
 
 function buildCommands() {
-  const playOption = (option) => option
-    .setName('busqueda')
-    .setDescription('Nombre o link: YouTube, SoundCloud, Spotify, Apple Music, Deezer, mp3, etc.')
+  const textOption = (option) => option
+    .setName('texto')
+    .setDescription('Texto que JUANVOICE leerá en voz alta.')
     .setRequired(true)
-    .setAutocomplete(true);
+    .setMaxLength(Math.min(CONFIG.maxTextLength, 2000));
 
-  const pageOption = (option) => option
-    .setName('pagina')
-    .setDescription('Número de página de la cola')
+  const voiceOption = (option) => option
+    .setName('voz')
+    .setDescription('Voz opcional para este mensaje.')
     .setRequired(false)
-    .setMinValue(1);
+    .addChoices(...VOICE_CHOICES);
 
   return [
     new SlashCommandBuilder()
-      .setName('play')
-      .setDescription('🎵 Reproduce música por nombre o link con JUANPLAY')
-      .addStringOption(playOption),
+      .setName('join')
+      .setDescription('JUANVOICE entra al canal de voz donde estás.'),
 
     new SlashCommandBuilder()
-      .setName('juanplay')
-      .setDescription('🔥 Comando principal personalizado de DEVJUANCHO')
-      .addStringOption(playOption),
+      .setName('leave')
+      .setDescription('JUANVOICE sale del canal de voz.'),
 
     new SlashCommandBuilder()
-      .setName('buscar')
-      .setDescription('🔎 Muestra recomendados con botones para elegir canción')
-      .addStringOption(playOption),
+      .setName('decir')
+      .setDescription('Lee un texto en voz alta con una voz opcional.')
+      .addStringOption(textOption)
+      .addStringOption(voiceOption),
 
     new SlashCommandBuilder()
-      .setName('recomendados')
-      .setDescription('🎯 Recomendados bonitos para elegir rápido')
-      .addStringOption(playOption),
+      .setName('hablar')
+      .setDescription('Lee un texto en voz alta usando la voz predeterminada.')
+      .addStringOption(textOption),
 
-    new SlashCommandBuilder().setName('queue').setDescription('📜 Muestra toda la cola por páginas').addIntegerOption(pageOption),
-    new SlashCommandBuilder().setName('cola').setDescription('📜 Muestra toda la cola por páginas').addIntegerOption(pageOption),
-    new SlashCommandBuilder().setName('nowplaying').setDescription('💿 Muestra la canción actual'),
-    new SlashCommandBuilder().setName('np').setDescription('💿 Muestra la canción actual'),
-    new SlashCommandBuilder().setName('panel').setDescription('🎛️ Panel bonito de música con controles'),
-    new SlashCommandBuilder().setName('skip').setDescription('⏭️ Salta la canción actual'),
-    new SlashCommandBuilder().setName('stop').setDescription('⏹️ Detiene la música y limpia la cola'),
-    new SlashCommandBuilder().setName('clearqueue').setDescription('🧹 Vacía la cola sin detener la canción actual'),
-    new SlashCommandBuilder().setName('limpiarcola').setDescription('🧹 Vacía la cola sin detener la canción actual'),
-    new SlashCommandBuilder().setName('pause').setDescription('⏸️ Pausa la canción'),
-    new SlashCommandBuilder().setName('resume').setDescription('▶️ Reanuda la canción'),
-    new SlashCommandBuilder().setName('leave').setDescription('👋 Saca a JUANPLAY del canal de voz'),
     new SlashCommandBuilder()
-      .setName('volume')
-      .setDescription('🔊 Cambia el volumen')
-      .addIntegerOption((option) => option.setName('numero').setDescription('Volumen 1 a 200').setRequired(true).setMinValue(1).setMaxValue(200)),
-    new SlashCommandBuilder().setName('testvoz').setDescription('🧪 Prueba conexión al canal de voz'),
-    new SlashCommandBuilder().setName('diagnostico').setDescription('🛠️ Revisa variables y estado del bot'),
-    new SlashCommandBuilder().setName('plataformas').setDescription('🌐 Plataformas y links compatibles'),
-    new SlashCommandBuilder().setName('setup').setDescription('⚙️ Muestra configuración recomendada'),
-    new SlashCommandBuilder().setName('creditos').setDescription('👑 Créditos de JUANPLAY'),
-    new SlashCommandBuilder().setName('invite').setDescription('🔗 Muestra el enlace para invitar el bot'),
-    new SlashCommandBuilder().setName('help').setDescription('📘 Lista de comandos JUANPLAY'),
-    new SlashCommandBuilder().setName('ping').setDescription('🏓 Latencia del bot'),
-  ].map((command) => command.setDMPermission(false));
-}
+      .setName('voces')
+      .setDescription('Muestra las voces disponibles.'),
 
-async function registerCommands() {
-  const rest = new REST({ version: '10' }).setToken(TOKEN);
-  const body = buildCommands().map((command) => command.toJSON());
-  if (GUILD_ID) {
-    await rest.put(Routes.applicationGuildCommands(client.user.id, GUILD_ID), { body });
-    console.log(`[JUANPLAY] Comandos slash registrados en el servidor: ${GUILD_ID}`);
-  } else {
-    await rest.put(Routes.applicationCommands(client.user.id), { body });
-    console.log('[JUANPLAY] Comandos slash globales registrados. Pueden tardar en aparecer.');
-  }
-}
+    new SlashCommandBuilder()
+      .setName('setvoz')
+      .setDescription('Configura la voz predeterminada del servidor.')
+      .addStringOption((option) => option
+        .setName('voz')
+        .setDescription('Nueva voz predeterminada.')
+        .setRequired(true)
+        .addChoices(...VOICE_CHOICES)),
 
-client.once('clientReady', async () => {
-  console.log(`✅ ${BOT_NAME} conectado como ${client.user.tag}`);
-  console.log(`🔗 ID de la app/bot: ${client.user.id}`);
-  console.log('🎵 Usa /help, /buscar, /panel o /juanplay en Discord.');
-  refreshPresence(true);
-  try {
-    await registerCommands();
-    console.log('✅ Comandos slash listos. Reinvita con scopes bot + applications.commands si no aparecen.');
-  } catch (error) {
-    console.error('❌ No pude registrar comandos slash:', error);
-  }
-});
+    new SlashCommandBuilder()
+      .setName('autotts')
+      .setDescription('Configura el modo automático de texto a voz.')
+      .addSubcommand((subcommand) => subcommand
+        .setName('canal')
+        .setDescription('Activa AutoTTS en un canal de texto.')
+        .addChannelOption((option) => option
+          .setName('canal')
+          .setDescription('Canal de texto que JUANVOICE leerá automáticamente.')
+          .setRequired(true)
+          .addChannelTypes(ChannelType.GuildText, ChannelType.GuildAnnouncement)))
+      .addSubcommand((subcommand) => subcommand
+        .setName('off')
+        .setDescription('Desactiva el modo automático.')),
 
-client.on('interactionCreate', async (interaction) => {
-  try {
-    if (interaction.isAutocomplete()) return handleAutocomplete(interaction);
-    if (interaction.isButton()) return handleButton(interaction);
-    if (!interaction.isChatInputCommand()) return;
+    new SlashCommandBuilder()
+      .setName('stop')
+      .setDescription('Detiene el audio actual y limpia la cola.'),
 
-    const remaining = checkCommandCooldown(interaction);
-    if (remaining > 0) {
-      return interaction.reply({
-        embeds: [warnEmbed('Anti-spam activo', `Espera **${Math.ceil(remaining / 1000)}s** antes de volver a usar este comando.`)],
-        flags: EPHEMERAL,
-      });
-    }
+    new SlashCommandBuilder()
+      .setName('cola')
+      .setDescription('Muestra la cola de mensajes TTS pendientes.'),
 
-    const name = interaction.commandName;
+    new SlashCommandBuilder()
+      .setName('limpiarcola')
+      .setDescription('Vacía la cola de mensajes TTS pendientes.'),
 
-    if (name === 'play' || name === 'juanplay') {
-      return handlePlay(interaction, interaction.options.getString('busqueda', true));
-    }
+    new SlashCommandBuilder()
+      .setName('panel')
+      .setDescription('Muestra un panel bonito con botones de control.'),
 
-    if (name === 'buscar' || name === 'recomendados') return handleSearch(interaction);
+    new SlashCommandBuilder()
+      .setName('diagnostico')
+      .setDescription('Muestra el estado técnico de JUANVOICE.'),
 
-    if (name === 'ping') {
-      return interaction.reply({ embeds: [okEmbed('Pong', `Latencia: **${Math.round(client.ws.ping)} ms**`)] });
-    }
-
-    if (name === 'help') return interaction.reply({ embeds: [helpEmbed()] });
-    if (name === 'plataformas') return interaction.reply({ embeds: [platformsEmbed()] });
-    if (name === 'creditos') return interaction.reply({ embeds: [creditsEmbed()] });
-    if (name === 'setup') return interaction.reply({ embeds: [setupEmbed()], flags: EPHEMERAL });
-    if (name === 'invite') {
-      if (BOT_INVITE_URL) return interaction.reply({ embeds: [inviteEmbed()] });
-      return interaction.reply({ embeds: [inviteEmbed()], flags: EPHEMERAL });
-    }
-    if (name === 'diagnostico') return handleDiagnostico(interaction);
-    if (name === 'testvoz') return handleTestVoice(interaction);
-
-    const q = getQueue(interaction.guild.id);
-
-    if (name === 'queue' || name === 'cola') {
-      const pageInput = interaction.options.getInteger('pagina') || 1;
-      const page = clamp(pageInput - 1, 0, getQueuePages(q) - 1);
-      return interaction.reply({ embeds: [queueEmbed(q, page)], components: queueComponents(q, page) });
-    }
-
-    if (name === 'panel') {
-      if (q.current) return interaction.reply({ embeds: [nowPlayingEmbed(q.current, q)], components: [playerControlsRow()] });
-      return interaction.reply({ embeds: [queueEmbed(q, 0)], components: queueComponents(q, 0) });
-    }
-
-    if (name === 'nowplaying' || name === 'np') {
-      if (!q.current) return interaction.reply({ embeds: [warnEmbed('Nada sonando', 'Usa `/play nombre o link` para empezar.')] });
-      return interaction.reply({ embeds: [nowPlayingEmbed(q.current, q)], components: [playerControlsRow()] });
-    }
-
-    if (name === 'skip') {
-      const sameVoiceError = requireSameVoice(interaction, q);
-      if (sameVoiceError) return interaction.reply({ embeds: [warnEmbed('Control protegido', sameVoiceError)], flags: EPHEMERAL });
-      if (!q.current) return interaction.reply({ embeds: [warnEmbed('Sin canción', 'No hay nada para saltar.')] });
-      q.player.stop(true);
-      return interaction.reply({ embeds: [okEmbed('Saltado', 'Pasando a la siguiente canción.')] });
-    }
-
-    if (name === 'stop') {
-      const sameVoiceError = requireSameVoice(interaction, q);
-      if (sameVoiceError) return interaction.reply({ embeds: [warnEmbed('Control protegido', sameVoiceError)], flags: EPHEMERAL });
-      q.tracks = [];
-      stopTrackProcess(q.current);
-      q.current = null;
-      q.player.stop(true);
-      refreshPresence(true);
-      return interaction.reply({ embeds: [okEmbed('Detenido', 'Música detenida y cola limpiada.')] });
-    }
-
-    if (name === 'clearqueue' || name === 'limpiarcola') {
-      const sameVoiceError = requireSameVoice(interaction, q);
-      if (sameVoiceError) return interaction.reply({ embeds: [warnEmbed('Control protegido', sameVoiceError)], flags: EPHEMERAL });
-      const removed = q.tracks.length;
-      q.tracks = [];
-      return interaction.reply({ embeds: [okEmbed('Cola vaciada', `Quité **${removed}** canciones de la cola. La canción actual ${q.current ? 'sigue sonando' : 'no estaba activa'}.`)] });
-    }
-
-    if (name === 'pause') {
-      const sameVoiceError = requireSameVoice(interaction, q);
-      if (sameVoiceError) return interaction.reply({ embeds: [warnEmbed('Control protegido', sameVoiceError)], flags: EPHEMERAL });
-      const ok = q.player.pause(true);
-      refreshPresence(true);
-      return interaction.reply({ embeds: [ok ? okEmbed('Pausado', 'La música quedó pausada.') : warnEmbed('No pude pausar', 'No hay música sonando.')] });
-    }
-
-    if (name === 'resume') {
-      const sameVoiceError = requireSameVoice(interaction, q);
-      if (sameVoiceError) return interaction.reply({ embeds: [warnEmbed('Control protegido', sameVoiceError)], flags: EPHEMERAL });
-      const ok = q.player.unpause();
-      refreshPresence(true);
-      return interaction.reply({ embeds: [ok ? okEmbed('Reanudado', 'La música sigue sonando.') : warnEmbed('No pude reanudar', 'No hay música pausada.')] });
-    }
-
-    if (name === 'volume') {
-      const sameVoiceError = requireSameVoice(interaction, q);
-      if (sameVoiceError) return interaction.reply({ embeds: [warnEmbed('Control protegido', sameVoiceError)], flags: EPHEMERAL });
-      const num = interaction.options.getInteger('numero', true);
-      q.volume = Math.max(1, Math.min(200, num)) / 100;
-      if (q.player.state.resource?.volume) q.player.state.resource.volume.setVolume(q.volume);
-      return interaction.reply({ embeds: [okEmbed('Volumen actualizado', `Volumen: **${num}%**`)] });
-    }
-
-    if (name === 'leave') {
-      const sameVoiceError = requireSameVoice(interaction, q);
-      if (sameVoiceError) return interaction.reply({ embeds: [warnEmbed('Control protegido', sameVoiceError)], flags: EPHEMERAL });
-      q.tracks = [];
-      stopTrackProcess(q.current);
-      q.current = null;
-      q.player.stop(true);
-      try { q.connection?.destroy(); } catch (_) {}
-      q.connection = null;
-      q.voiceChannelId = null;
-      refreshPresence(true);
-      return interaction.reply({ embeds: [okEmbed('Me fui del canal', `${BOT_NAME} salió del canal de voz.`)] });
-    }
-  } catch (error) {
-    console.error('[JUANPLAY] Error ejecutando comando:', error);
-    const embed = errEmbed('Ocurrió un error interno', buildPlaybackError(error));
-    if (interaction.deferred || interaction.replied) {
-      return interaction.editReply({ embeds: [embed], components: [] }).catch(() => {});
-    }
-    return interaction.reply({ embeds: [embed], flags: EPHEMERAL }).catch(() => {});
-  }
-});
-
-async function handleTestVoice(interaction) {
-  await interaction.deferReply({ flags: EPHEMERAL });
-  const q = getQueue(interaction.guild.id);
-  try {
-    const connection = await ensureVoice(interaction, q);
-    return interaction.editReply({ embeds: [okEmbed('Voz lista', `${BOT_NAME} conectó al canal de voz.\nEstado: **${connection.state.status}**`)] });
-  } catch (error) {
-    return interaction.editReply({ embeds: [errEmbed('No pude conectar a voz', buildPlaybackError(error))] });
-  }
-}
-
-async function handleDiagnostico(interaction) {
-  const q = getQueue(interaction.guild.id);
-  const lines = [
-    `🤖 Bot: **${client.user.tag}**`,
-    `🧩 Node: **${process.version}**`,
-    `🎚️ FFmpeg: **${ffmpegPath ? 'incluido' : 'no detectado'}**`,
-    `🎙️ Opus: **${hasModule('opusscript') || hasModule('@discordjs/opus') ? 'instalado' : 'no instalado'}**`,
-    `🏠 GUILD_ID: **${GUILD_ID ? GUILD_ID : 'no configurado, comandos globales'}**`,
-    `🔊 Volumen: **${Math.round(q.volume * 100)}%**`,
-    `📡 Voice timeout: **${VOICE_TIMEOUT_MS}ms**`,
-    `🛡️ Anti-spam: **${COMMAND_COOLDOWN_MS}ms**`,
-    `🔕 Anuncios automáticos: **${ANNOUNCE_NOW_PLAYING ? 'activados' : 'desactivados'}**`,
-    `📌 Estado voz: **${q.connection?.state?.status || 'sin conexión'}**`,
-    `🎧 Actual: **${q.current ? escapeMd(q.current.title) : 'nada'}**`,
-    `📜 Cola: **${q.tracks.length}/${MAX_QUEUE_SIZE}**`,
-    `🧪 YT clients: **${YTDLP_PLAYER_CLIENTS.join(', ')}**`,
-    `🌐 IPv4 yt-dlp: **${YTDLP_FORCE_IPV4 ? 'sí' : 'no'}**`,
-    `☁️ SoundCloud fallback: **${SOUNDCLOUD_FALLBACK ? 'sí' : 'no'}**`,
-    `🎶 Actividad: **${lastPresenceText || 'no definida'}**`,
+    new SlashCommandBuilder()
+      .setName('help')
+      .setDescription('Muestra todos los comandos disponibles.'),
   ];
-  if (q.lastError) lines.push(`\nÚltimo error: \`${cut(q.lastError.message || q.lastError, 700)}\``);
-  return interaction.reply({ embeds: [musicEmbed('Diagnóstico JUANPLAY', lines.join('\n'))], flags: EPHEMERAL });
 }
+
+async function registerSlashCommands() {
+  if (!CONFIG.guildId) {
+    console.warn('[COMMANDS] Falta GUILD_ID. No se registraron comandos slash.');
+    return;
+  }
+
+  const rest = new REST({ version: '10' }).setToken(CONFIG.token);
+  const commands = buildCommands().map((command) => command.toJSON());
+
+  await rest.put(Routes.applicationGuildCommands(client.user.id, CONFIG.guildId), { body: commands });
+  console.log(`[COMMANDS] ${commands.length} comandos slash registrados en guild ${CONFIG.guildId}.`);
+}
+
+async function getInteractionMember(interaction) {
+  if (interaction.member?.voice) return interaction.member;
+  return interaction.guild.members.fetch(interaction.user.id);
+}
+
+async function replyInteraction(interaction, payload) {
+  if (interaction.deferred || interaction.replied) {
+    return interaction.editReply(payload);
+  }
+
+  return interaction.reply(payload);
+}
+
+async function replyError(interaction, message) {
+  const payload = { embeds: [errorEmbed(message)], ephemeral: true };
+
+  if (interaction.deferred || interaction.replied) {
+    return interaction.followUp(payload).catch(() => interaction.editReply({ embeds: [errorEmbed(message)] }).catch(console.error));
+  }
+
+  return interaction.reply(payload).catch(console.error);
+}
+
+async function handleJoin(interaction) {
+  const member = await getInteractionMember(interaction);
+  await connectToMemberVoice(member);
+  await interaction.reply({
+    embeds: [successEmbed('Conectado', `Entré a ${member.voice.channel} y estoy listo para leer mensajes.`)],
+  });
+}
+
+async function handleLeave(interaction) {
+  const state = getState(interaction.guildId);
+  const connection = state.connection || getVoiceConnection(interaction.guildId);
+
+  if (!connection) {
+    throw new UserFacingError('No estoy conectado a ningún canal de voz.');
+  }
+
+  await disconnectGuild(interaction.guildId, true);
+  await interaction.reply({ embeds: [successEmbed('Desconectado', 'Salí del canal de voz y limpié la cola.')] });
+}
+
+async function handleSay(interaction, useVoiceOption) {
+  await interaction.deferReply();
+
+  const member = await getInteractionMember(interaction);
+  await connectToMemberVoice(member);
+
+  const text = interaction.options.getString('texto', true);
+  const voice = useVoiceOption ? interaction.options.getString('voz', false) : null;
+  const { item } = await enqueueSpeech({
+    guild: interaction.guild,
+    member,
+    channel: interaction.channel,
+    text,
+    voiceKey: voice,
+    source: interaction.commandName,
+  });
+
+  const state = getState(interaction.guildId);
+  const isNowPlaying = state.current?.id === item.id;
+  const indexInQueue = state.queue.findIndex((queued) => queued.id === item.id);
+  const status = isNowPlaying ? 'Reproduciendo ahora' : `Posición en cola: **${indexInQueue + 1}**`;
+
+  await interaction.editReply({
+    embeds: [successEmbed('Texto agregado', `${status}\n**Voz:** ${item.voiceLabel}\n**Texto:** “${truncate(item.text, 180)}”`)],
+  });
+}
+
+async function handleVoices(interaction) {
+  const fields = Object.entries(VOICES).map(([key, voice]) => ({
+    name: `${voice.emoji} ${voice.label}`,
+    value: `Valor: \`${key}\`\nMotor: \`${voice.shortName}\``,
+    inline: true,
+  }));
+
+  await interaction.reply({
+    embeds: [infoEmbed('Voces disponibles', 'Puedes usarlas en `/decir texto voz` o configurarlas con `/setvoz voz`.', fields)],
+    ephemeral: true,
+  });
+}
+
+async function handleSetVoice(interaction) {
+  const voice = interaction.options.getString('voz', true);
+
+  if (!VOICES[voice]) {
+    throw new UserFacingError('Esa voz no existe. Usa `/voces` para ver las opciones disponibles.');
+  }
+
+  const state = getState(interaction.guildId);
+  state.defaultVoice = voice;
+  persistGuildState(interaction.guildId);
+
+  await interaction.reply({
+    embeds: [successEmbed('Voz configurada', `La voz predeterminada del servidor ahora es **${getVoiceLabel(voice)}**.`)],
+  });
+}
+
+async function handleAutoTTS(interaction) {
+  const subcommand = interaction.options.getSubcommand();
+  const state = getState(interaction.guildId);
+
+  if (subcommand === 'off') {
+    state.autoTtsEnabled = false;
+    state.autoTtsChannelId = null;
+    persistGuildState(interaction.guildId);
+
+    await interaction.reply({ embeds: [successEmbed('AutoTTS desactivado', 'Ya no leeré automáticamente mensajes de canales de texto.')] });
+    return;
+  }
+
+  const channel = interaction.options.getChannel('canal', true);
+  state.autoTtsEnabled = true;
+  state.autoTtsChannelId = channel.id;
+  persistGuildState(interaction.guildId);
+
+  await interaction.reply({
+    embeds: [successEmbed('AutoTTS activado', `Leeré automáticamente los mensajes escritos en ${channel}.\nPara apagarlo usa **/autotts off**.`)],
+  });
+}
+
+async function handleStop(interaction) {
+  await stopGuildAudio(interaction.guildId);
+  await interaction.reply({ embeds: [successEmbed('Audio detenido', 'Detuve el audio actual y limpié toda la cola.')] });
+}
+
+async function handleQueue(interaction) {
+  await interaction.reply({ embeds: [queueEmbed(interaction.guildId)], ephemeral: true });
+}
+
+async function handleClearQueue(interaction) {
+  const amount = clearGuildQueue(interaction.guildId);
+  await interaction.reply({ embeds: [successEmbed('Cola limpiada', `Se eliminaron **${amount}** mensajes pendientes. El audio actual no se detuvo.`)] });
+}
+
+async function handlePanel(interaction) {
+  const embed = infoEmbed(
+    'Panel de control',
+    'Usa los botones para controlar JUANVOICE de forma rápida.\n\n🔊 **Entrar** · 👋 **Salir** · ⏹️ **Detener** · 🧹 **Limpiar cola** · 📋 **Ver cola**',
+  );
+
+  await interaction.reply({ embeds: [embed], components: panelComponents() });
+}
+
+async function handleDiagnostic(interaction) {
+  const state = getState(interaction.guildId);
+  const connection = state.connection || getVoiceConnection(interaction.guildId);
+  const channelId = connection?.joinConfig?.channelId;
+  const voiceChannel = channelId ? interaction.guild.channels.cache.get(channelId) : null;
+  const ffmpegDetected = Boolean(process.env.FFMPEG_PATH && fs.existsSync(process.env.FFMPEG_PATH));
+
+  const fields = [
+    { name: '🔌 Voz', value: connection ? `Conectado (${connection.state.status})` : 'No conectado', inline: true },
+    { name: '📍 Canal actual', value: voiceChannel ? `${voiceChannel}` : 'Ninguno', inline: true },
+    { name: '📋 Cola', value: `${state.queue.length} pendiente(s)`, inline: true },
+    { name: '🎙️ Voz actual', value: getVoiceLabel(state.defaultVoice), inline: true },
+    { name: '🟢 Node.js', value: process.version, inline: true },
+    { name: '🎛️ FFmpeg', value: ffmpegDetected ? 'Detectado por ffmpeg-static' : 'No detectado por ffmpeg-static', inline: true },
+    { name: '📡 Ping', value: `${client.ws.ping}ms`, inline: true },
+    { name: '⏱️ Uptime', value: formatDuration(process.uptime() * 1000), inline: true },
+    { name: '🤖 AutoTTS', value: state.autoTtsEnabled && state.autoTtsChannelId ? `<#${state.autoTtsChannelId}>` : 'Desactivado', inline: true },
+  ];
+
+  await interaction.reply({ embeds: [infoEmbed('Diagnóstico de JUANVOICE', 'Estado actual del bot y del sistema.', fields)], ephemeral: true });
+}
+
+async function handleHelp(interaction) {
+  const fields = [
+    { name: '🔊 Voz', value: '`/join` entra al canal.\n`/leave` sale del canal.\n`/stop` detiene audio y limpia cola.', inline: false },
+    { name: '💬 Texto a voz', value: '`/decir texto voz` lee con voz opcional.\n`/hablar texto` lee con la voz predeterminada.\n`/voces` muestra voces.\n`/setvoz voz` define la voz del servidor.', inline: false },
+    { name: '⚙️ AutoTTS y cola', value: '`/autotts canal` activa lectura automática.\n`/autotts off` desactiva AutoTTS.\n`/cola` muestra pendientes.\n`/limpiarcola` vacía la cola.', inline: false },
+    { name: '🧩 Panel y estado', value: '`/panel` muestra botones.\n`/diagnostico` revisa conexión, FFmpeg, ping y uptime.', inline: false },
+  ];
+
+  await interaction.reply({
+    embeds: [infoEmbed('Ayuda de JUANVOICE', 'Bot TTS profesional para Discord Voice. Sin música, sin YouTube, sin yt-dlp y sin cookies.', fields)],
+    ephemeral: true,
+  });
+}
+
+async function handleButton(interaction) {
+  const id = interaction.customId;
+
+  if (id === 'jv_join') {
+    const member = await getInteractionMember(interaction);
+    await connectToMemberVoice(member);
+    await interaction.reply({ embeds: [successEmbed('Conectado', `Entré a ${member.voice.channel}.`)], ephemeral: true });
+    return;
+  }
+
+  if (id === 'jv_leave') {
+    const state = getState(interaction.guildId);
+    const connection = state.connection || getVoiceConnection(interaction.guildId);
+    if (!connection) throw new UserFacingError('No estoy conectado a ningún canal de voz.');
+    await disconnectGuild(interaction.guildId, true);
+    await interaction.reply({ embeds: [successEmbed('Desconectado', 'Salí del canal de voz y limpié la cola.')], ephemeral: true });
+    return;
+  }
+
+  if (id === 'jv_stop') {
+    await stopGuildAudio(interaction.guildId);
+    await interaction.reply({ embeds: [successEmbed('Detenido', 'Audio detenido y cola limpiada.')], ephemeral: true });
+    return;
+  }
+
+  if (id === 'jv_clear') {
+    const amount = clearGuildQueue(interaction.guildId);
+    await interaction.reply({ embeds: [successEmbed('Cola limpiada', `Se eliminaron **${amount}** mensajes pendientes.`)], ephemeral: true });
+    return;
+  }
+
+  if (id === 'jv_queue') {
+    await interaction.reply({ embeds: [queueEmbed(interaction.guildId)], ephemeral: true });
+  }
+}
+
+client.once(Events.ClientReady, async () => {
+  console.log(`[READY] ${client.user.tag} listo.`);
+  client.user.setActivity('Leyendo mensajes | JUANVOICE', { type: ActivityType.Listening });
+
+  try {
+    await cleanupOldTempFiles();
+    await registerSlashCommands();
+  } catch (error) {
+    console.error('[READY] Error en inicialización:', error);
+  }
+});
+
+client.on(Events.InteractionCreate, async (interaction) => {
+  if (!interaction.inGuild()) return;
+
+  try {
+    checkCooldown(interaction.user.id);
+
+    if (interaction.isChatInputCommand()) {
+      switch (interaction.commandName) {
+        case 'join':
+          await handleJoin(interaction);
+          break;
+        case 'leave':
+          await handleLeave(interaction);
+          break;
+        case 'decir':
+          await handleSay(interaction, true);
+          break;
+        case 'hablar':
+          await handleSay(interaction, false);
+          break;
+        case 'voces':
+          await handleVoices(interaction);
+          break;
+        case 'setvoz':
+          await handleSetVoice(interaction);
+          break;
+        case 'autotts':
+          await handleAutoTTS(interaction);
+          break;
+        case 'stop':
+          await handleStop(interaction);
+          break;
+        case 'cola':
+          await handleQueue(interaction);
+          break;
+        case 'limpiarcola':
+          await handleClearQueue(interaction);
+          break;
+        case 'panel':
+          await handlePanel(interaction);
+          break;
+        case 'diagnostico':
+          await handleDiagnostic(interaction);
+          break;
+        case 'help':
+          await handleHelp(interaction);
+          break;
+        default:
+          await replyError(interaction, 'Comando no reconocido. Usa `/help`.');
+      }
+      return;
+    }
+
+    if (interaction.isButton() && interaction.customId.startsWith('jv_')) {
+      await handleButton(interaction);
+    }
+  } catch (error) {
+    if (error instanceof UserFacingError) {
+      await replyError(interaction, error.message);
+      return;
+    }
+
+    console.error('[INTERACTION] Error inesperado:', error);
+    await replyError(interaction, 'Ocurrió un error inesperado, pero el bot sigue funcionando. Revisa los logs si eres el dueño.');
+  }
+});
+
+client.on(Events.MessageCreate, async (message) => {
+  try {
+    if (!message.inGuild() || message.author.bot) return;
+
+    const state = getState(message.guildId);
+    if (!state.autoTtsEnabled || !state.autoTtsChannelId || message.channelId !== state.autoTtsChannelId) return;
+
+    const member = message.member || (await message.guild.members.fetch(message.author.id));
+    if (!member?.voice?.channel) return;
+
+    const connection = state.connection || getVoiceConnection(message.guildId);
+    if (!connection) {
+      await connectToMemberVoice(member);
+    } else if (connection.joinConfig?.channelId !== member.voice.channel.id) {
+      return;
+    }
+
+    checkCooldown(message.author.id);
+
+    await enqueueSpeech({
+      guild: message.guild,
+      member,
+      channel: message.channel,
+      text: message.content,
+      voiceKey: null,
+      source: 'autotts',
+    });
+  } catch (error) {
+    if (error instanceof UserFacingError) return;
+    console.error('[AUTOTTS] Error:', error);
+  }
+});
+
+setInterval(cleanCooldowns, 60000).unref();
 
 function startHealthServer() {
-  const port = process.env.PORT;
-  if (!port) return;
   const server = http.createServer((req, res) => {
-    res.writeHead(200, { 'content-type': 'application/json' });
-    res.end(JSON.stringify({
+    const isHealth = req.url === '/' || req.url === '/health';
+
+    if (!isHealth) {
+      res.writeHead(404, { 'Content-Type': 'application/json; charset=utf-8' });
+      res.end(JSON.stringify({ ok: false, error: 'Not found' }));
+      return;
+    }
+
+    const body = {
       ok: true,
       bot: BOT_NAME,
-      brand: BRAND,
-      version: BOT_VERSION,
-      user: client.user?.tag || null,
-      guilds: client.guilds?.cache?.size || 0,
-      activeQueues: queues.size,
-    }));
+      ready: client.isReady(),
+      uptime: Math.floor(process.uptime()),
+      guilds: client.guilds.cache.size,
+      ping: client.ws.ping,
+      timestamp: new Date().toISOString(),
+    };
+
+    res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+    res.end(JSON.stringify(body));
   });
-  server.listen(port, () => console.log(`🌐 Health server activo en puerto ${port}`));
+
+  server.listen(CONFIG.port, '0.0.0.0', () => {
+    console.log(`[HEALTH] Servidor health escuchando en puerto ${CONFIG.port}.`);
+  });
 }
 
-process.on('unhandledRejection', (error) => console.error('[JUANPLAY] Unhandled rejection:', error));
-process.on('uncaughtException', (error) => console.error('[JUANPLAY] Uncaught exception:', error));
+process.on('unhandledRejection', (reason) => {
+  console.error('[PROCESS] Promesa rechazada sin manejar:', reason);
+});
 
-startHealthServer();
-client.login(TOKEN);
+process.on('uncaughtException', (error) => {
+  console.error('[PROCESS] Excepción no capturada:', error);
+});
+
+async function shutdown(signal) {
+  console.log(`[SHUTDOWN] Recibido ${signal}. Cerrando JUANVOICE...`);
+
+  for (const guildId of guildStates.keys()) {
+    await disconnectGuild(guildId, true).catch(console.error);
+  }
+
+  await cleanupOldTempFiles().catch(console.error);
+  client.destroy();
+  process.exit(0);
+}
+
+process.once('SIGINT', () => shutdown('SIGINT'));
+process.once('SIGTERM', () => shutdown('SIGTERM'));
+
+async function main() {
+  if (!CONFIG.token) {
+    console.error('[ENV] Falta DISCORD_TOKEN. Configura las variables de entorno antes de iniciar.');
+    process.exit(1);
+  }
+
+  if (!CONFIG.guildId) {
+    console.warn('[ENV] Falta GUILD_ID. El bot iniciará, pero no podrá registrar comandos slash del servidor automáticamente.');
+  }
+
+  startHealthServer();
+  await client.login(CONFIG.token);
+}
+
+main().catch((error) => {
+  console.error('[MAIN] Error fatal al iniciar:', error);
+  process.exit(1);
+});
