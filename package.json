@@ -1,13 +1,12 @@
 {
-  "name": "juanplay-devjuancho-publico-v9-2-youtube-clients-soundcloud",
-  "version": "9.2.0",
-  "description": "JUANPLAY v9.2 público por DEVJUANCHO / JuanStudio. Basado en el código funcional v7, sin cookies obligatorias, con clientes YouTube alternativos, SoundCloud fallback, panel, cola completa, anti-spam y actividad dinámica.",
+  "name": "juanplay-devjuancho-publico-v9-3-build-fix",
+  "version": "9.3.0",
+  "description": "JUANPLAY v9.3 público por DEVJUANCHO / JuanStudio. Fix de build Railway/Docker: sin postinstall, basado en el código funcional, sin cookies obligatorias, panel, cola completa, anti-spam, actividad dinámica y fallbacks.",
   "main": "index.js",
   "type": "commonjs",
   "scripts": {
     "start": "node index.js",
-    "check": "node --check index.js",
-    "postinstall": "node scripts/update-ytdlp.js"
+    "check": "node --check index.js"
   },
   "engines": {
     "node": ">=20.0.0"

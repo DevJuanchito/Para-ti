@@ -1,4 +1,4 @@
-# 🎧 JUANPLAY DEVJUANCHO PÚBLICO v9.2
+# 🎧 JUANPLAY DEVJUANCHO PÚBLICO v9.3
 
 Bot de música personalizado para **DEVJUANCHO / JuanStudio**.
 
@@ -62,4 +62,11 @@ Eso significa que YouTube marcó la IP del hosting o ese video. El bot no se cae
 - Usar link directo `.mp3`, `.m4a`, `.wav`, `.ogg`, `.flac`, `.webm`.
 
 ---
-👑 Créditos: **DEVJUANCHO • JuanStudio • JUANPLAY v9.2**
+👑 Créditos: **DEVJUANCHO • JuanStudio • JUANPLAY v9.3**
+
+
+## 🧯 Fix Railway Build
+
+Esta versión no usa `postinstall`, para que Railway/Docker no fallen durante `npm install`.
+
+Sube todos los archivos a la raíz del repo: `index.js`, `package.json`, `nixpacks.toml`, `Dockerfile`, `.env.example` y `README.md`.
