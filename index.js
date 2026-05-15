@@ -1,5 +1,5 @@
 /*
-  🎧 JUANPLAY DEVJUANCHO PÚBLICO v9.1
+  🎧 JUANPLAY DEVJUANCHO PÚBLICO v9.2
   Creado para DEVJUANCHO / JuanStudio
   Basado en el código funcional v7 de DEVJUANCHO / JuanStudio.
   Motor de reproducción conservado: yt-dlp directo, sin cookies obligatorias.
@@ -57,12 +57,16 @@ const SUCCESS_COLOR = process.env.SUCCESS_COLOR || '#2ecc71';
 const WARNING_COLOR = process.env.WARNING_COLOR || '#f1c40f';
 const ERROR_COLOR = process.env.ERROR_COLOR || '#ff2f7d';
 const BOT_NAME = process.env.BOT_NAME || 'JUANPLAY';
-const BOT_VERSION = '9.1.0';
+const BOT_VERSION = '9.2.0';
 const BRAND = process.env.BOT_BRAND || 'DEVJUANCHO • JuanStudio';
 const BOT_INVITE_URL = process.env.BOT_INVITE_URL || '';
 const SUPPORT_SERVER = process.env.SUPPORT_SERVER || '';
 const WEBSITE_URL = process.env.WEBSITE_URL || '';
 const USER_AGENT = process.env.USER_AGENT || 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36';
+const YTDLP_PLAYER_CLIENTS = parseCsv(process.env.YTDLP_PLAYER_CLIENTS || 'default,android,ios,mweb,web');
+const YTDLP_FORCE_IPV4 = String(process.env.YTDLP_FORCE_IPV4 || 'true').toLowerCase() !== 'false';
+const YTDLP_STREAM_START_TIMEOUT_MS = Math.max(800, Math.min(10000, Number(process.env.YTDLP_STREAM_START_TIMEOUT_MS || 2500)));
+const SOUNDCLOUD_FALLBACK = String(process.env.SOUNDCLOUD_FALLBACK || 'true').toLowerCase() !== 'false';
 const EPHEMERAL = MessageFlags.Ephemeral;
 
 if (!TOKEN) {
@@ -207,7 +211,7 @@ function platformsEmbed() {
     '✅ **Spotify / Apple Music / Deezer / Tidal**: toma el nombre del link y busca la canción en YouTube.',
     '✅ Muchas páginas soportadas por **yt-dlp**.',
     '',
-    '✅ Esta versión va **sin cookies obligatorias** y conserva el motor que ya te reproduce.',
+    '✅ Esta versión va **sin cookies obligatorias**, prueba varios clientes internos de YouTube y usa SoundCloud como respaldo automático.',
   ].join('\n'));
 }
 
@@ -225,7 +229,7 @@ function setupEmbed() {
     '│ `COMMAND_COOLDOWN_MS=2500` evita spam de comandos.',
     '│ `MAX_QUEUE_SIZE=500` protege servidores públicos.',
     '│ `BOT_INVITE_URL` opcional para `/invite`.',
-    '╰─ No necesitas cookies para usar esta versión.',
+    '╰─ No necesitas cookies para usar esta versión. Si YouTube bloquea la IP, el bot intenta SoundCloud/fallback automático.',
     '',
     '🎨 **Perfil del bot:** avatar, banner y descripción se cambian en Discord Developer Portal. Desde el código sí se actualiza la actividad dinámica.',
   ].join('\n'));
@@ -329,6 +333,14 @@ function escapeMd(text) {
     .replace(/\|/g, '\\|');
 }
 
+function parseCsv(value) {
+  return String(value || '')
+    .split(',')
+    .map((item) => item.trim().toLowerCase())
+    .filter(Boolean)
+    .filter((item, index, list) => list.indexOf(item) === index);
+}
+
 function cleanInput(input) {
   return String(input || '').trim().replace(/^<|>$/g, '').trim();
 }
@@ -358,9 +370,10 @@ function youtubePlaylistUrl(url) {
   return /[?&]list=/i.test(url) && /youtube\.com|youtu\.be/i.test(url);
 }
 
-function commonYtDlpFlags(extra = {}) {
+function commonYtDlpFlags(extra = {}, clientName = 'default') {
   // Motor igual al código que ya te funciona: yt-dlp directo, sin cookies obligatorias.
-  return {
+  // v9.2 prueba varios clientes internos de YouTube antes de rendirse.
+  const flags = {
     noWarnings: true,
     noCheckCertificates: true,
     preferFreeFormats: true,
@@ -375,6 +388,36 @@ function commonYtDlpFlags(extra = {}) {
     socketTimeout: 20,
     ...extra,
   };
+
+  if (YTDLP_FORCE_IPV4) flags.forceIpv4 = true;
+
+  if (clientName && clientName !== 'default') {
+    flags.extractorArgs = [`youtube:player_client=${clientName}`];
+  }
+
+  return flags;
+}
+
+function getYtDlpClientsFor(url) {
+  const text = String(url || '');
+  if (!/youtube\.com|youtu\.be/i.test(text)) return ['default'];
+  const list = YTDLP_PLAYER_CLIENTS.length ? YTDLP_PLAYER_CLIENTS : ['default', 'android', 'ios', 'mweb', 'web'];
+  return list.includes('default') ? list : ['default', ...list];
+}
+
+async function runYtDlpJson(input, extra = {}) {
+  let lastError = null;
+  for (const clientName of getYtDlpClientsFor(input)) {
+    try {
+      return await ytdlp(input, commonYtDlpFlags(extra, clientName));
+    } catch (error) {
+      lastError = error;
+      const msg = error?.stderr || error?.message || String(error || '');
+      console.warn(`[JUANPLAY] yt-dlp JSON falló con cliente ${clientName}: ${cut(msg, 500)}`);
+      if (!/youtube\.com|youtu\.be|ytsearch/i.test(String(input))) break;
+    }
+  }
+  throw lastError || new Error('yt-dlp no devolvió datos');
 }
 
 function getQueue(guildId) {
@@ -601,11 +644,16 @@ async function recoverBlockedYouTubeTrack(q, failedTrack, error) {
   const query = cleanSearchText(failedTrack.title || failedTrack.searchQuery || failedTrack.url || '');
   if (!query || isUrl(query)) return false;
 
-  const results = await searchYouTube(query, 8);
-  const alternative = results.find((track) => {
-    const id = getYouTubeId(track.url);
-    return track.url && (!originalId || id !== originalId);
-  });
+  const soundCloudResults = await searchSoundCloud(query, 5).catch(() => []);
+  let alternative = soundCloudResults.find((track) => track.url);
+
+  if (!alternative) {
+    const results = await searchYouTube(query, 8);
+    alternative = results.find((track) => {
+      const id = getYouTubeId(track.url);
+      return track.url && (!originalId || id !== originalId);
+    });
+  }
 
   if (!alternative) return false;
 
@@ -622,7 +670,7 @@ async function recoverBlockedYouTubeTrack(q, failedTrack, error) {
         'No puse cookies ni cambié tu ENV.',
         '',
         `🎧 Video bloqueado: **${escapeMd(failedTrack.title || 'canción anterior')}**`,
-        `🔁 Intentaré una alternativa automática: **[${escapeMd(alternative.title)}](${alternative.url})**`,
+        `🔁 Intentaré una alternativa automática (${escapeMd(alternative.source || 'fallback')}): **[${escapeMd(alternative.title)}](${alternative.url})**`,
       ].join('\n')
     );
     if (alternative.thumbnail) embed.setThumbnail(alternative.thumbnail);
@@ -633,30 +681,47 @@ async function recoverBlockedYouTubeTrack(q, failedTrack, error) {
 }
 
 async function createYtDlpAudioResource(track) {
-  const flags = commonYtDlpFlags({
-    output: '-',
-    format: 'bestaudio[ext=webm][acodec=opus]/bestaudio[acodec=opus]/bestaudio/best',
-    noPlaylist: true,
-    quiet: true,
-  });
+  let lastError = null;
+  const clients = getYtDlpClientsFor(track.url);
 
-  const proc = ytdlp.exec(track.url, flags, {
-    windowsHide: true,
-    maxBuffer: 1024 * 1024 * 50,
-  });
+  for (const clientName of clients) {
+    const flags = commonYtDlpFlags({
+      output: '-',
+      format: 'bestaudio[ext=webm][acodec=opus]/bestaudio[acodec=opus]/bestaudio/bestaudio*/best',
+      noPlaylist: true,
+      quiet: true,
+    }, clientName);
 
-  track.process = proc;
+    const proc = ytdlp.exec(track.url, flags, {
+      windowsHide: true,
+      maxBuffer: 1024 * 1024 * 50,
+    });
 
-  const stream = await waitForYtDlpStream(proc);
+    track.process = proc;
+    track.ytdlpClient = clientName;
 
-  return createAudioResource(stream, {
-    inputType: StreamType.Arbitrary,
-    inlineVolume: true,
-    metadata: track,
-  });
+    try {
+      const stream = await waitForYtDlpStream(proc, clientName);
+      return createAudioResource(stream, {
+        inputType: StreamType.Arbitrary,
+        inlineVolume: true,
+        metadata: track,
+      });
+    } catch (error) {
+      lastError = error;
+      const msg = error?.stderr || error?.message || String(error || '');
+      console.warn(`[JUANPLAY] Reintento yt-dlp falló con cliente ${clientName}: ${cut(msg, 500)}`);
+      try {
+        if (!proc.killed) proc.kill('SIGKILL');
+      } catch (_) {}
+      track.process = null;
+    }
+  }
+
+  throw lastError || new Error('yt-dlp no pudo abrir stream de audio');
 }
 
-function waitForYtDlpStream(proc) {
+function waitForYtDlpStream(proc, clientName = 'default') {
   const pass = new PassThrough();
   let stderr = '';
   let settled = false;
@@ -680,7 +745,7 @@ function waitForYtDlpStream(proc) {
 
     const timer = setTimeout(() => {
       if (!closed) finishResolve();
-    }, 2200);
+    }, YTDLP_STREAM_START_TIMEOUT_MS);
     timer.unref?.();
 
     proc.stdout?.once('readable', finishResolve);
@@ -695,7 +760,7 @@ function waitForYtDlpStream(proc) {
       clearTimeout(timer);
       if (code && code !== 0) {
         const detail = stderr || `yt-dlp cerró con código ${code}`;
-        console.warn(`[JUANPLAY] yt-dlp cerró con código ${code}: ${cut(detail, 700)}`);
+        console.warn(`[JUANPLAY] yt-dlp cerró con código ${code} usando cliente ${clientName}: ${cut(detail, 700)}`);
         finishReject(new Error(detail));
         return;
       }
@@ -766,24 +831,24 @@ async function resolveInput(input, limit = 1) {
 }
 
 async function readUrlInfo(url) {
-  return ytdlp(url, commonYtDlpFlags({
+  return runYtDlpJson(url, {
     dumpSingleJson: true,
     skipDownload: true,
     noPlaylist: false,
     playlistEnd: MAX_PLAYLIST_ITEMS,
     quiet: true,
-  }));
+  });
 }
 
 async function readPlaylist(url, limit) {
-  const data = await ytdlp(url, commonYtDlpFlags({
+  const data = await runYtDlpJson(url, {
     dumpSingleJson: true,
     skipDownload: true,
     flatPlaylist: true,
     yesPlaylist: true,
     playlistEnd: limit,
     quiet: true,
-  })).catch((error) => {
+  }).catch((error) => {
     console.warn('[JUANPLAY] Error leyendo playlist:', error.message);
     return null;
   });
@@ -816,18 +881,46 @@ async function searchYouTube(query, limit = 1) {
   const fast = await searchYouTubeFast(clean, limit).catch(() => []);
   if (fast.length) return fast;
 
-  const data = await ytdlp(`ytsearch${limit}:${clean}`, commonYtDlpFlags({
+  const data = await runYtDlpJson(`ytsearch${limit}:${clean}`, {
     dumpSingleJson: true,
     skipDownload: true,
     flatPlaylist: true,
     quiet: true,
-  })).catch((error) => {
+  }).catch((error) => {
     console.warn('[JUANPLAY] Error buscando con yt-dlp:', error.message);
     return null;
   });
 
   if (!data?.entries?.length) return [];
   return data.entries.map(normalizeInfo).filter(Boolean).slice(0, limit);
+}
+
+async function searchSoundCloud(query, limit = 5) {
+  if (!SOUNDCLOUD_FALLBACK) return [];
+  const clean = cleanSearchText(query);
+  if (!clean) return [];
+
+  const data = await ytdlp(`scsearch${limit}:${clean}`, {
+    noWarnings: true,
+    noCheckCertificates: true,
+    preferFreeFormats: true,
+    dumpSingleJson: true,
+    skipDownload: true,
+    flatPlaylist: true,
+    quiet: true,
+    retries: 3,
+    socketTimeout: 20,
+  }).catch((error) => {
+    console.warn('[JUANPLAY] Error buscando en SoundCloud:', error.message);
+    return null;
+  });
+
+  if (!data?.entries?.length) return [];
+  return data.entries.map((info) => {
+    const track = normalizeInfo(info);
+    if (track) track.source = 'SoundCloud';
+    return track;
+  }).filter(Boolean).slice(0, limit);
 }
 
 async function searchYouTubeFast(query, limit = 10) {
@@ -1451,6 +1544,9 @@ async function handleDiagnostico(interaction) {
     `📌 Estado voz: **${q.connection?.state?.status || 'sin conexión'}**`,
     `🎧 Actual: **${q.current ? escapeMd(q.current.title) : 'nada'}**`,
     `📜 Cola: **${q.tracks.length}/${MAX_QUEUE_SIZE}**`,
+    `🧪 YT clients: **${YTDLP_PLAYER_CLIENTS.join(', ')}**`,
+    `🌐 IPv4 yt-dlp: **${YTDLP_FORCE_IPV4 ? 'sí' : 'no'}**`,
+    `☁️ SoundCloud fallback: **${SOUNDCLOUD_FALLBACK ? 'sí' : 'no'}**`,
     `🎶 Actividad: **${lastPresenceText || 'no definida'}**`,
   ];
   if (q.lastError) lines.push(`\nÚltimo error: \`${cut(q.lastError.message || q.lastError, 700)}\``);
