@@ -1,6 +1,6 @@
 {
-  "name": "juanplay-devjuancho-publico-v9-base-tu-codigo",
-  "version": "9.0.0",
+  "name": "juanplay-devjuancho-publico-v9-1-sin-cookie-fallback",
+  "version": "9.1.0",
   "description": "JUANPLAY v9 público por DEVJUANCHO / JuanStudio. Basado en el código funcional v7, sin cookies obligatorias, con panel, cola completa, anti-spam, actividad dinámica y embeds decorados.",
   "main": "index.js",
   "type": "commonjs",

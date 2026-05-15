@@ -1,5 +1,5 @@
 /*
-  🎧 JUANPLAY DEVJUANCHO PÚBLICO v9
+  🎧 JUANPLAY DEVJUANCHO PÚBLICO v9.1
   Creado para DEVJUANCHO / JuanStudio
   Basado en el código funcional v7 de DEVJUANCHO / JuanStudio.
   Motor de reproducción conservado: yt-dlp directo, sin cookies obligatorias.
@@ -7,6 +7,7 @@
 
 const http = require('node:http');
 const path = require('node:path');
+const { PassThrough } = require('node:stream');
 
 const {
   Client,
@@ -56,7 +57,7 @@ const SUCCESS_COLOR = process.env.SUCCESS_COLOR || '#2ecc71';
 const WARNING_COLOR = process.env.WARNING_COLOR || '#f1c40f';
 const ERROR_COLOR = process.env.ERROR_COLOR || '#ff2f7d';
 const BOT_NAME = process.env.BOT_NAME || 'JUANPLAY';
-const BOT_VERSION = '9.0.0';
+const BOT_VERSION = '9.1.0';
 const BRAND = process.env.BOT_BRAND || 'DEVJUANCHO • JuanStudio';
 const BOT_INVITE_URL = process.env.BOT_INVITE_URL || '';
 const SUPPORT_SERVER = process.env.SUPPORT_SERVER || '';
@@ -532,15 +533,27 @@ async function playNext(guildId) {
   } catch (error) {
     q.lastError = error;
     console.error('[JUANPLAY] No pude iniciar canción:', error);
+
+    const recovered = await recoverBlockedYouTubeTrack(q, next, error).catch((recoverError) => {
+      console.warn('[JUANPLAY] No pude buscar alternativa automática:', recoverError.message);
+      return false;
+    });
+
+    stopTrackProcess(next);
+    q.current = null;
+    q.locked = false;
+    refreshPresence();
+
+    if (recovered) {
+      setTimeout(() => playNext(guildId).catch(console.error), 350);
+      return;
+    }
+
     if (q.textChannel) {
       q.textChannel.send({
         embeds: [errEmbed('No pude reproducir esa canción', buildPlaybackError(error))],
       }).catch(() => {});
     }
-    stopTrackProcess(next);
-    q.current = null;
-    q.locked = false;
-    refreshPresence();
     setTimeout(() => playNext(guildId).catch(console.error), 800);
     return;
   }
@@ -550,13 +563,73 @@ async function playNext(guildId) {
 
 function buildPlaybackError(error) {
   const message = String(error?.message || error || 'Error desconocido');
-  if (/429|Too Many Requests|Sign in to confirm|not a bot|cookies-from-browser|authentication/i.test(message)) {
-    return 'YouTube bloqueó la IP del hosting o pidió verificación anti-bot.\n\n✅ Esta versión no obliga cookies. Prueba buscar por **nombre de canción**, usar otro video, SoundCloud o un link directo `.mp3/.m4a/.wav`.\n\nSi tu código base v7 sí reproduce en el mismo hosting, este build mantiene ese mismo motor de reproducción.';
+  if (isYouTubeBlockedError(error)) {
+    return 'YouTube bloqueó ese video con verificación anti-bot.\n\n✅ No puse cookies. El bot intenta buscar una alternativa automática por el nombre de la canción. Si todas fallan, prueba escribir **el nombre de la canción** en vez de pegar ese link, usa SoundCloud o un link directo `.mp3/.m4a/.wav`.';
+  }
+  if (/429|Too Many Requests/i.test(message)) {
+    return 'YouTube devolvió **429 / Too Many Requests**. No puse cookies. Prueba otra canción, otro link, SoundCloud o un link directo de audio.';
   }
   if (/signalling|aborted|VoiceConnection|timed out|Ready/i.test(message)) {
     return `No pude conectar a Discord Voice.\n\nRevisa permisos del canal: **Ver canales, Conectarse y Hablar**.\nSi estás en Railway y queda en \`signalling\`, el hosting puede estar bloqueando Discord Voice/UDP.\n\nDetalle: \`${cut(message, 500)}\``;
   }
   return `Detalle: \`${cut(message, 900)}\``;
+}
+
+function isYouTubeBlockedError(error) {
+  const message = String(error?.stderr || error?.message || error || '');
+  return /Sign in to confirm|not a bot|cookies-from-browser|authentication|confirm you.?re not a bot/i.test(message);
+}
+
+function getYouTubeId(url) {
+  const text = String(url || '');
+  try {
+    const parsed = new URL(text);
+    if (/youtu\.be$/i.test(parsed.hostname)) return parsed.pathname.replace(/^\//, '').split('/')[0] || null;
+    if (/youtube\.com$/i.test(parsed.hostname) || /youtube\.com$/i.test(parsed.hostname.replace(/^www\./, ''))) {
+      return parsed.searchParams.get('v') || null;
+    }
+  } catch (_) {}
+  const match = text.match(/(?:v=|youtu\.be\/|shorts\/)([a-zA-Z0-9_-]{6,})/);
+  return match?.[1] || null;
+}
+
+async function recoverBlockedYouTubeTrack(q, failedTrack, error) {
+  if (!isYouTubeBlockedError(error)) return false;
+  if (!failedTrack || failedTrack._autoRecovered) return false;
+
+  const originalId = getYouTubeId(failedTrack.url);
+  const query = cleanSearchText(failedTrack.title || failedTrack.searchQuery || failedTrack.url || '');
+  if (!query || isUrl(query)) return false;
+
+  const results = await searchYouTube(query, 8);
+  const alternative = results.find((track) => {
+    const id = getYouTubeId(track.url);
+    return track.url && (!originalId || id !== originalId);
+  });
+
+  if (!alternative) return false;
+
+  alternative.requestedBy = failedTrack.requestedBy;
+  alternative.requestedById = failedTrack.requestedById;
+  alternative._autoRecovered = true;
+  alternative.title = alternative.title || failedTrack.title;
+  q.tracks.unshift(alternative);
+
+  if (q.textChannel) {
+    const embed = warnEmbed(
+      'YouTube bloqueó ese video',
+      [
+        'No puse cookies ni cambié tu ENV.',
+        '',
+        `🎧 Video bloqueado: **${escapeMd(failedTrack.title || 'canción anterior')}**`,
+        `🔁 Intentaré una alternativa automática: **[${escapeMd(alternative.title)}](${alternative.url})**`,
+      ].join('\n')
+    );
+    if (alternative.thumbnail) embed.setThumbnail(alternative.thumbnail);
+    q.textChannel.send({ embeds: [embed] }).catch(() => {});
+  }
+
+  return true;
 }
 
 async function createYtDlpAudioResource(track) {
@@ -574,33 +647,74 @@ async function createYtDlpAudioResource(track) {
 
   track.process = proc;
 
-  // youtube-dl-exec puede comportarse como proceso y promesa a la vez.
-  // Esto evita logs de Unhandled rejection sin cambiar el stream que ya funciona.
-  if (typeof proc.catch === 'function') {
-    proc.catch((error) => {
-      const msg = error?.stderr || error?.message || String(error || '');
-      if (msg) console.warn(`[JUANPLAY] yt-dlp finalizó con error controlado: ${cut(msg, 700)}`);
-    });
-  }
+  const stream = await waitForYtDlpStream(proc);
 
-  let stderr = '';
-  proc.stderr?.on('data', (chunk) => {
-    stderr += chunk.toString();
-    if (stderr.length > 4000) stderr = stderr.slice(-4000);
-  });
-
-  proc.on('close', (code) => {
-    if (code && code !== 0) console.warn(`[JUANPLAY] yt-dlp cerró con código ${code}: ${cut(stderr, 700)}`);
-  });
-
-  proc.on('error', (error) => {
-    console.warn('[JUANPLAY] Error lanzando yt-dlp:', error.message);
-  });
-
-  return createAudioResource(proc.stdout, {
+  return createAudioResource(stream, {
     inputType: StreamType.Arbitrary,
     inlineVolume: true,
     metadata: track,
+  });
+}
+
+function waitForYtDlpStream(proc) {
+  const pass = new PassThrough();
+  let stderr = '';
+  let settled = false;
+  let closed = false;
+
+  proc.stdout?.pipe(pass);
+
+  return new Promise((resolve, reject) => {
+    const finishResolve = () => {
+      if (settled) return;
+      settled = true;
+      resolve(pass);
+    };
+
+    const finishReject = (error) => {
+      if (settled) return;
+      settled = true;
+      try { pass.destroy(); } catch (_) {}
+      reject(error);
+    };
+
+    const timer = setTimeout(() => {
+      if (!closed) finishResolve();
+    }, 2200);
+    timer.unref?.();
+
+    proc.stdout?.once('readable', finishResolve);
+
+    proc.stderr?.on('data', (chunk) => {
+      stderr += chunk.toString();
+      if (stderr.length > 4000) stderr = stderr.slice(-4000);
+    });
+
+    proc.on('close', (code) => {
+      closed = true;
+      clearTimeout(timer);
+      if (code && code !== 0) {
+        const detail = stderr || `yt-dlp cerró con código ${code}`;
+        console.warn(`[JUANPLAY] yt-dlp cerró con código ${code}: ${cut(detail, 700)}`);
+        finishReject(new Error(detail));
+        return;
+      }
+      finishResolve();
+    });
+
+    proc.on('error', (error) => {
+      clearTimeout(timer);
+      console.warn('[JUANPLAY] Error lanzando yt-dlp:', error.message);
+      finishReject(error);
+    });
+
+    if (typeof proc.catch === 'function') {
+      proc.catch((error) => {
+        const msg = error?.stderr || error?.message || String(error || '');
+        if (msg) console.warn(`[JUANPLAY] yt-dlp finalizó con error controlado: ${cut(msg, 700)}`);
+        if (!settled) finishReject(new Error(msg || 'yt-dlp falló'));
+      });
+    }
   });
 }
 

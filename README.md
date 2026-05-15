@@ -1,4 +1,4 @@
-# 🎧 JUANPLAY DEVJUANCHO PÚBLICO v9
+# 🎧 JUANPLAY DEVJUANCHO PÚBLICO v9.1
 
 Versión basada en **tu código que sí funciona y sí se escucha**.
 
@@ -73,4 +73,20 @@ El avatar, banner y descripción/About Me se cambian en **Discord Developer Port
 Desde el código esta versión controla la **actividad dinámica** y todos los mensajes decorados.
 
 ---
-👑 Créditos: **DEVJUANCHO • JuanStudio • JUANPLAY v9**
+👑 Créditos: **DEVJUANCHO • JuanStudio • JUANPLAY v9.1**
+
+
+## ✅ Fix v9.1 sin cookie
+
+Esta versión conserva el motor de tu código que ya reproduce: `youtube-dl-exec` + `yt-dlp` directo, sin `YOUTUBE_COOKIE` obligatoria.
+
+Si YouTube bloquea un video específico con `Sign in to confirm you’re not a bot`, el bot no se cae: intenta buscar una alternativa automática por el título de la canción y la pone al frente de la cola.
+
+Variables importantes:
+
+```env
+DISCORD_TOKEN=TU_TOKEN
+GUILD_ID=1201996939437289583
+ANNOUNCE_NOW_PLAYING=false
+COMMAND_COOLDOWN_MS=2500
+```
