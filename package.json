@@ -1,7 +1,7 @@
 {
   "name": "juanvoice",
-  "version": "1.0.0",
-  "description": "JUANVOICE - Bot TTS para Discord Voice sin musica, sin YouTube, sin yt-dlp y listo para Railway.",
+  "version": "1.0.2",
+  "description": "JUANVOICE - Bot TTS para Discord Voice sin musica, con reintentos de conexion de voz y listo para Railway.",
   "main": "index.js",
   "private": false,
   "license": "MIT",

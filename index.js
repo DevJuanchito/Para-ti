@@ -122,6 +122,14 @@ function normalizeHexColor(value, fallback) {
   return /^#[0-9a-f]{6}$/i.test(raw) ? raw : fallback;
 }
 
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function isAbortTimeout(error) {
+  return error?.name === 'AbortError' || error?.code === 'ABORT_ERR' || /aborted|abort/i.test(String(error?.message || ''));
+}
+
 const CONFIG = {
   token: process.env.DISCORD_TOKEN,
   guildId: process.env.GUILD_ID,
@@ -131,6 +139,9 @@ const CONFIG = {
   maxTextLength: parsePositiveInt(process.env.MAX_TEXT_LENGTH, 250),
   maxQueueSize: parsePositiveInt(process.env.MAX_QUEUE_SIZE, 50),
   voiceTimeoutMs: parseMs(process.env.VOICE_TIMEOUT_MS, 120000),
+  voiceJoinTimeoutMs: parseMs(process.env.VOICE_JOIN_TIMEOUT_MS, 45000),
+  voiceJoinRetries: Math.min(parsePositiveInt(process.env.VOICE_JOIN_RETRIES, 2), 5),
+  debugVoice: parseBool(process.env.DEBUG_VOICE, false),
   autoTtsEnabledByDefault: parseBool(process.env.AUTO_TTS_ENABLED, false),
   ttsProvider: ['edge', 'google', 'auto'].includes(String(process.env.TTS_PROVIDER || '').toLowerCase()) ? String(process.env.TTS_PROVIDER || '').toLowerCase() : 'auto',
   port: parsePositiveInt(process.env.PORT, 3000),
@@ -564,6 +575,12 @@ function wireConnection(connection, guildId) {
   if (connection.__juanvoiceWired) return;
   connection.__juanvoiceWired = true;
 
+  connection.on('stateChange', (oldState, newState) => {
+    if (CONFIG.debugVoice) {
+      console.log(`[VOICE:${guildId}] ${oldState.status} -> ${newState.status}`);
+    }
+  });
+
   connection.on(VoiceConnectionStatus.Disconnected, async () => {
     try {
       await Promise.race([
@@ -598,12 +615,20 @@ async function assertVoicePermissions(channel) {
   const me = channel.guild.members.me || (await channel.guild.members.fetchMe());
   const permissions = channel.permissionsFor(me);
 
+  if (!permissions?.has(PermissionsBitField.Flags.ViewChannel)) {
+    throw new UserFacingError(`No puedo ver el canal ${channel}. Revisa los permisos del rol del bot.`);
+  }
+
   if (!permissions?.has(PermissionsBitField.Flags.Connect)) {
     throw new UserFacingError(`No tengo permiso para **conectarme** a ${channel}.`);
   }
 
   if (!permissions?.has(PermissionsBitField.Flags.Speak)) {
     throw new UserFacingError(`No tengo permiso para **hablar** en ${channel}.`);
+  }
+
+  if (channel.userLimit > 0 && channel.members.size >= channel.userLimit && !permissions.has(PermissionsBitField.Flags.MoveMembers)) {
+    throw new UserFacingError(`El canal ${channel} está lleno. Dame permiso **Mover miembros** o libera un espacio.`);
   }
 }
 
@@ -619,36 +644,94 @@ async function connectToVoiceChannel(channel) {
   const player = ensurePlayer(guildId);
   const existing = state.connection || getVoiceConnection(guildId);
 
-  if (existing && existing.joinConfig?.channelId === channel.id && existing.state.status !== VoiceConnectionStatus.Destroyed) {
-    state.connection = existing;
-    existing.subscribe(player);
-    clearLeaveTimer(guildId);
-    return existing;
-  }
-
   if (existing && existing.state.status !== VoiceConnectionStatus.Destroyed) {
-    try {
-      existing.destroy();
-    } catch (error) {
-      console.error('[VOICE] Error moviendo conexión:', error);
+    if (existing.joinConfig?.channelId === channel.id) {
+      state.connection = existing;
+      wireConnection(existing, guildId);
+      existing.subscribe(player);
+      clearLeaveTimer(guildId);
+
+      if (existing.state.status === VoiceConnectionStatus.Ready) {
+        return existing;
+      }
+
+      try {
+        await entersState(existing, VoiceConnectionStatus.Ready, Math.min(CONFIG.voiceJoinTimeoutMs, 15000));
+        return existing;
+      } catch (error) {
+        console.warn(`[VOICE:${guildId}] Conexión existente atorada en ${existing.state.status}. Reiniciando...`, error.message);
+        try {
+          existing.destroy();
+        } catch (destroyError) {
+          console.error('[VOICE] Error destruyendo conexión atorada:', destroyError);
+        }
+        state.connection = null;
+      }
+    } else {
+      try {
+        existing.destroy();
+      } catch (error) {
+        console.error('[VOICE] Error moviendo conexión:', error);
+      }
+      state.connection = null;
     }
   }
 
-  const connection = joinVoiceChannel({
-    channelId: channel.id,
-    guildId,
-    adapterCreator: channel.guild.voiceAdapterCreator,
-    selfDeaf: false,
-    selfMute: false,
-  });
+  let lastError = null;
 
-  state.connection = connection;
-  wireConnection(connection, guildId);
-  connection.subscribe(player);
-  clearLeaveTimer(guildId);
+  for (let attempt = 1; attempt <= CONFIG.voiceJoinRetries; attempt += 1) {
+    const connection = joinVoiceChannel({
+      channelId: channel.id,
+      guildId,
+      adapterCreator: channel.guild.voiceAdapterCreator,
+      selfDeaf: false,
+      selfMute: false,
+    });
 
-  await entersState(connection, VoiceConnectionStatus.Ready, 30000);
-  return connection;
+    state.connection = connection;
+    wireConnection(connection, guildId);
+    connection.subscribe(player);
+    clearLeaveTimer(guildId);
+
+    try {
+      await entersState(connection, VoiceConnectionStatus.Ready, CONFIG.voiceJoinTimeoutMs);
+      console.log(`[VOICE:${guildId}] Conectado a ${channel.name} en intento ${attempt}.`);
+      return connection;
+    } catch (error) {
+      lastError = error;
+      console.error(
+        `[VOICE:${guildId}] No llegó a estado Ready en ${CONFIG.voiceJoinTimeoutMs}ms `
+        + `(intento ${attempt}/${CONFIG.voiceJoinRetries}). Estado actual: ${connection.state.status}`,
+        error,
+      );
+
+      try {
+        connection.destroy();
+      } catch (destroyError) {
+        console.error('[VOICE] Error destruyendo conexión fallida:', destroyError);
+      }
+
+      state.connection = null;
+      state.playing = false;
+
+      if (attempt < CONFIG.voiceJoinRetries) {
+        await sleep(1500 * attempt);
+      }
+    }
+  }
+
+  const detail = lastError ? truncate(lastError.message || lastError.name || String(lastError), 120) : 'timeout desconocido';
+
+  if (isAbortTimeout(lastError)) {
+    throw new UserFacingError(
+      `No pude establecer conexión de voz con Discord antes del timeout (**${CONFIG.voiceJoinTimeoutMs}ms**). `
+      + 'Esto casi siempre es red/UDP/firewall del host o una región de voz inestable. '
+      + 'Prueba cambiar la región del canal de voz a **Automático** o a otra región, redeployar Railway y ejecutar `/join` otra vez. '
+      + `Detalle técnico: \`${detail}\`.`,
+    );
+  }
+
+  throw new UserFacingError(`No pude conectarme al canal de voz. Detalle técnico: \`${detail}\`.`);
 }
 
 async function connectToMemberVoice(member) {
@@ -790,6 +873,10 @@ async function processQueue(guildId) {
   clearLeaveTimer(guildId);
 
   try {
+    if (connection.state.status !== VoiceConnectionStatus.Ready) {
+      await entersState(connection, VoiceConnectionStatus.Ready, Math.min(CONFIG.voiceJoinTimeoutMs, 15000));
+    }
+
     const synthesis = await synthesizeToFile(item.text, item.voiceKey);
     item.filePath = synthesis.filePath;
     item.provider = synthesis.provider;
@@ -1165,6 +1252,8 @@ async function handleDiagnostic(interaction) {
     { name: '⏱️ Uptime', value: formatDuration(process.uptime() * 1000), inline: true },
     { name: '🤖 AutoTTS', value: state.autoTtsEnabled && state.autoTtsChannelId ? `<#${state.autoTtsChannelId}>` : 'Desactivado', inline: true },
     { name: '🗣️ Motor TTS', value: `\`${CONFIG.ttsProvider}\``, inline: true },
+    { name: '🧭 Timeout join', value: `${CONFIG.voiceJoinTimeoutMs}ms / ${CONFIG.voiceJoinRetries} intento(s)`, inline: true },
+    { name: '🐞 Debug voz', value: CONFIG.debugVoice ? 'Activado' : 'Desactivado', inline: true },
     { name: '🧪 Dependencias voz', value: `\`\`\`txt\n${truncate(getDependencyReportShort(), 900)}\n\`\`\``, inline: false },
   ];
 
