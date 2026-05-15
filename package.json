@@ -1,18 +1,24 @@
 {
-  "name": "roblox-live-codes-discord-bot",
-  "version": "1.0.0",
-  "description": "Discord slash-command bot for creating Roblox redeem codes via Open Cloud DataStores.",
-  "type": "module",
+  "name": "juanplay-devjuancho-definitivo-v7",
+  "version": "7.0.0",
+  "description": "JUANPLAY Music Bot definitivo v7 por DEVJUANCHO / JuanStudio. Arreglado Opus, YouTube links/nombres, recomendaciones, yt-dlp y modo sin cookie.",
   "main": "index.js",
+  "type": "commonjs",
   "scripts": {
-    "deploy": "node deploy-commands.js",
-    "start": "node index.js"
+    "start": "node index.js",
+    "check": "node --check index.js"
   },
   "engines": {
-    "node": ">=22.12.0"
+    "node": ">=20.0.0"
   },
   "dependencies": {
-    "discord.js": "^14.26.4",
-    "dotenv": "^16.4.7"
+    "@discordjs/voice": "latest",
+    "discord.js": "latest",
+    "ffmpeg-static": "latest",
+    "libsodium-wrappers": "latest",
+    "prism-media": "latest",
+    "youtube-dl-exec": "latest",
+    "yt-search": "latest",
+    "opusscript": "latest"
   }
 }
