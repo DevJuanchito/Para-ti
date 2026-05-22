@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="es">
+  <head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Para Ann, de Edgar</title>
+
+    <link href="https://fonts.googleapis.com/css?family=Roboto+Mono:100,300,400,700" rel="stylesheet">
+    <link rel="stylesheet" href="https://maxcdn.bootstrapcdn.com/font-awesome/4.7.0/css/font-awesome.min.css">
+    <link rel="stylesheet" href="./style.css">
+  </head>
+
+  <body>
+    <div id="wrapper">
+      <div id="paper">
+
+        <div class="newspaper-title">
+          <img class="news-letter v1" src="2.png" alt="H">
+          <img class="news-letter v2" src="3.png" alt="o">
+          <img class="news-letter v3" src="4.png" alt="l">
+          <img class="news-letter v4" src="5.png" alt="a">
+
+          <div class="news-space"></div>
+
+          <img class="news-letter v2" src="6.png" alt="A">
+          <img class="news-letter v1" src="7.png" alt="m">
+          <img class="news-letter v4" src="8.png" alt="o">
+          <img class="news-letter v3" src="9.png" alt="r">
+        </div>
+
+        <div id="cursor"></div>
+
+        <div class="dot" id="dot1"></div>
+        <div class="dot" id="dot2"></div>
+        <div class="dot" id="dot3"></div>
+
+        <div id="vertical-margin"></div>
+
+        <div id="horizontal-margins">
+          <script>
+            for (let i = 0; i <= 31; i++) {
+              document.write('<div class="horizontal-margin">' + i + '</div>');
+            }
+          </script>
+        </div>
+
+        <div id="letters"></div>
+
+        <div id="photo-container" class="hidden">
+          <div class="slideshow">
+            <img class="slide active" src="1.png" alt="Edgar y Ann 1">
+            <img class="slide" src="10.png" alt="Edgar y Ann 2">
+          </div>
+
+          <p>Edgar & Ann ❤️</p>
+        </div>
+
+      </div>
+    </div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/moment.js/2.18.0/moment.min.js"></script>
+    <script src="./script.js"></script>
+  </body>
+</html>
