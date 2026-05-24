@@ -3,6 +3,7 @@ const {
   ChannelType,
   EmbedBuilder,
   ModalBuilder,
+  MessageFlags,
   PermissionFlagsBits,
   SlashCommandBuilder,
   TextInputBuilder,
@@ -23,6 +24,7 @@ const {
   makeLinkButton,
   makePreviewButtons,
   mergeDraft,
+  localizeEmbedJson,
   normalizeEmbedJson,
   parseColor,
   replacePlaceholders,
@@ -81,11 +83,11 @@ async function getOwnedPanelSession(interaction, sessionId) {
   cleanOldSessions();
   const session = panelSessions.get(sessionId);
   if (!session) {
-    await interaction.reply({ content: '⏰ Este panel expiró. Usa `/embed panel` otra vez.', ephemeral: true }).catch(() => null);
+    await interaction.reply({ content: '⏰ Este panel expiró. Usa `/embed panel` otra vez.', flags: MessageFlags.Ephemeral }).catch(() => null);
     return null;
   }
   if (interaction.user.id !== session.userId) {
-    await interaction.reply({ content: '❌ Solo quien abrió este panel puede usarlo.', ephemeral: true }).catch(() => null);
+    await interaction.reply({ content: '❌ Solo quien abrió este panel puede usarlo.', flags: MessageFlags.Ephemeral }).catch(() => null);
     return null;
   }
   return session;
@@ -183,7 +185,7 @@ async function renderPanelReply(interaction, sessionId, session, mode = 'reply',
     content: extraContent ?? (limitError ? `❌ ${limitError}` : '🎛️ **Editor visual listo.** Ajusta tu embed y envíalo cuando esté perfecto.'),
     embeds: [controlEmbed, ...payload.embeds],
     components: createPanelComponents(sessionId),
-    ephemeral: true
+    flags: MessageFlags.Ephemeral
   };
 
   if (mode === 'update') return interaction.update(response);
@@ -464,7 +466,7 @@ module.exports = {
 
     if (subcommand === 'ayuda') {
       const brand = process.env.BOT_BRAND || 'Embed Studio';
-      await interaction.reply({ embeds: [createHelpEmbed(brand)], ephemeral: true });
+      await interaction.reply({ embeds: [createHelpEmbed(brand)], flags: MessageFlags.Ephemeral });
       return;
     }
 
@@ -509,12 +511,12 @@ module.exports = {
     cleanOldSessions();
     const session = previewSessions.get(sessionId);
     if (!session) {
-      await interaction.reply({ content: '⏰ Esta previsualización expiró. Vuelve a crear el embed.', ephemeral: true });
+      await interaction.reply({ content: '⏰ Esta previsualización expiró. Vuelve a crear el embed.', flags: MessageFlags.Ephemeral });
       return true;
     }
 
     if (interaction.user.id !== session.userId) {
-      await interaction.reply({ content: '❌ Solo quien creó esta previsualización puede usar estos botones.', ephemeral: true });
+      await interaction.reply({ content: '❌ Solo quien creó esta previsualización puede usar estos botones.', flags: MessageFlags.Ephemeral });
       return true;
     }
 
@@ -534,7 +536,7 @@ module.exports = {
 
     const permissionError = getBotPermissionError(targetChannel, interaction.client.user);
     if (permissionError) {
-      await interaction.reply({ content: `❌ ${permissionError}`, ephemeral: true });
+      await interaction.reply({ content: `❌ ${permissionError}`, flags: MessageFlags.Ephemeral });
       return true;
     }
 
@@ -589,7 +591,7 @@ module.exports = {
         session.draft = mergeDraft(session.draft, imported);
         await renderPanelReply(interaction, sessionId, session, 'reply', '✅ JSON/ENV importado y decorado. Revisa la previsualización.');
       } catch (error) {
-        await interaction.reply({ content: `❌ No pude importar eso: ${error.message}`, ephemeral: true });
+        await interaction.reply({ content: `❌ No pude importar eso: ${error.message}`, flags: MessageFlags.Ephemeral });
       }
       return true;
     }
@@ -602,13 +604,13 @@ async function handlePanel(interaction) {
   const targetChannel = interaction.options.getChannel('canal') ?? interaction.channel;
   const targetError = validateMessageTarget(targetChannel);
   if (targetError) {
-    await interaction.reply({ content: `❌ ${targetError}`, ephemeral: true });
+    await interaction.reply({ content: `❌ ${targetError}`, flags: MessageFlags.Ephemeral });
     return;
   }
 
   const permissionError = getBotPermissionError(targetChannel, interaction.client.user);
   if (permissionError) {
-    await interaction.reply({ content: `❌ ${permissionError}`, ephemeral: true });
+    await interaction.reply({ content: `❌ ${permissionError}`, flags: MessageFlags.Ephemeral });
     return;
   }
 
@@ -659,20 +661,20 @@ async function handlePanelButton(interaction) {
     const targetChannel = await getTargetChannel(interaction, session.channelId);
     const targetError = validateMessageTarget(targetChannel);
     if (targetError) {
-      await interaction.reply({ content: `❌ ${targetError}`, ephemeral: true });
+      await interaction.reply({ content: `❌ ${targetError}`, flags: MessageFlags.Ephemeral });
       return true;
     }
 
     const permissionError = getBotPermissionError(targetChannel, interaction.client.user);
     if (permissionError) {
-      await interaction.reply({ content: `❌ ${permissionError}`, ephemeral: true });
+      await interaction.reply({ content: `❌ ${permissionError}`, flags: MessageFlags.Ephemeral });
       return true;
     }
 
     const payload = buildPayloadFromDraft(session.draft, interaction);
     const limitError = ensureEmbedLimits(payload.embeds);
     if (limitError) {
-      await interaction.reply({ content: `❌ ${limitError}`, ephemeral: true });
+      await interaction.reply({ content: `❌ ${limitError}`, flags: MessageFlags.Ephemeral });
       return true;
     }
 
@@ -761,13 +763,13 @@ async function handleCreate(interaction) {
   const targetChannel = interaction.options.getChannel('canal') ?? interaction.channel;
   const targetError = validateMessageTarget(targetChannel);
   if (targetError) {
-    await interaction.reply({ content: `❌ ${targetError}`, ephemeral: true });
+    await interaction.reply({ content: `❌ ${targetError}`, flags: MessageFlags.Ephemeral });
     return;
   }
 
   const permissionError = getBotPermissionError(targetChannel, interaction.client.user);
   if (permissionError) {
-    await interaction.reply({ content: `❌ ${permissionError}`, ephemeral: true });
+    await interaction.reply({ content: `❌ ${permissionError}`, flags: MessageFlags.Ephemeral });
     return;
   }
 
@@ -780,18 +782,18 @@ async function handleCreate(interaction) {
 
   const limitError = ensureEmbedLimits([embed]);
   if (limitError) {
-    await interaction.reply({ content: `❌ ${limitError}`, ephemeral: true });
+    await interaction.reply({ content: `❌ ${limitError}`, flags: MessageFlags.Ephemeral });
     return;
   }
 
   const buttonLabel = interaction.options.getString('boton_texto');
   const buttonUrl = interaction.options.getString('boton_url');
   if ((buttonLabel && !buttonUrl) || (!buttonLabel && buttonUrl)) {
-    await interaction.reply({ content: '❌ Para usar botón debes poner `boton_texto` y `boton_url` juntos.', ephemeral: true });
+    await interaction.reply({ content: '❌ Para usar botón debes poner `boton_texto` y `boton_url` juntos.', flags: MessageFlags.Ephemeral });
     return;
   }
   if (buttonUrl && !isHttpUrl(buttonUrl)) {
-    await interaction.reply({ content: '❌ La URL del botón debe empezar con http:// o https://', ephemeral: true });
+    await interaction.reply({ content: '❌ La URL del botón debe empezar con http:// o https://', flags: MessageFlags.Ephemeral });
     return;
   }
 
@@ -819,13 +821,13 @@ async function handleTemplate(interaction) {
   const targetChannel = interaction.options.getChannel('canal') ?? interaction.channel;
   const targetError = validateMessageTarget(targetChannel);
   if (targetError) {
-    await interaction.reply({ content: `❌ ${targetError}`, ephemeral: true });
+    await interaction.reply({ content: `❌ ${targetError}`, flags: MessageFlags.Ephemeral });
     return;
   }
 
   const permissionError = getBotPermissionError(targetChannel, interaction.client.user);
   if (permissionError) {
-    await interaction.reply({ content: `❌ ${permissionError}`, ephemeral: true });
+    await interaction.reply({ content: `❌ ${permissionError}`, flags: MessageFlags.Ephemeral });
     return;
   }
 
@@ -841,18 +843,18 @@ async function handleTemplate(interaction) {
 
   const limitError = ensureEmbedLimits([embed]);
   if (limitError) {
-    await interaction.reply({ content: `❌ ${limitError}`, ephemeral: true });
+    await interaction.reply({ content: `❌ ${limitError}`, flags: MessageFlags.Ephemeral });
     return;
   }
 
   const buttonLabel = interaction.options.getString('boton_texto');
   const buttonUrl = interaction.options.getString('boton_url');
   if ((buttonLabel && !buttonUrl) || (!buttonLabel && buttonUrl)) {
-    await interaction.reply({ content: '❌ Para usar botón debes poner `boton_texto` y `boton_url` juntos.', ephemeral: true });
+    await interaction.reply({ content: '❌ Para usar botón debes poner `boton_texto` y `boton_url` juntos.', flags: MessageFlags.Ephemeral });
     return;
   }
   if (buttonUrl && !isHttpUrl(buttonUrl)) {
-    await interaction.reply({ content: '❌ La URL del botón debe empezar con http:// o https://', ephemeral: true });
+    await interaction.reply({ content: '❌ La URL del botón debe empezar con http:// o https://', flags: MessageFlags.Ephemeral });
     return;
   }
 
@@ -872,13 +874,13 @@ async function handleImport(interaction, rawData) {
   const targetChannel = interaction.options.getChannel('canal') ?? interaction.channel;
   const targetError = validateMessageTarget(targetChannel);
   if (targetError) {
-    await interaction.reply({ content: `❌ ${targetError}`, ephemeral: true });
+    await interaction.reply({ content: `❌ ${targetError}`, flags: MessageFlags.Ephemeral });
     return;
   }
 
   const permissionError = getBotPermissionError(targetChannel, interaction.client.user);
   if (permissionError) {
-    await interaction.reply({ content: `❌ ${permissionError}`, ephemeral: true });
+    await interaction.reply({ content: `❌ ${permissionError}`, flags: MessageFlags.Ephemeral });
     return;
   }
 
@@ -886,14 +888,14 @@ async function handleImport(interaction, rawData) {
   try {
     draft = importDraftFromText(rawData, interaction);
   } catch (error) {
-    await interaction.reply({ content: `❌ No pude importar eso: ${error.message}`, ephemeral: true });
+    await interaction.reply({ content: `❌ No pude importar eso: ${error.message}`, flags: MessageFlags.Ephemeral });
     return;
   }
 
   const payload = buildPayloadFromDraft(draft, interaction);
   const limitError = ensureEmbedLimits(payload.embeds);
   if (limitError) {
-    await interaction.reply({ content: `❌ ${limitError}`, ephemeral: true });
+    await interaction.reply({ content: `❌ ${limitError}`, flags: MessageFlags.Ephemeral });
     return;
   }
 
@@ -904,25 +906,25 @@ async function handleEdit(interaction) {
   const targetChannel = interaction.options.getChannel('canal') ?? interaction.channel;
   const targetError = validateMessageTarget(targetChannel);
   if (targetError) {
-    await interaction.reply({ content: `❌ ${targetError}`, ephemeral: true });
+    await interaction.reply({ content: `❌ ${targetError}`, flags: MessageFlags.Ephemeral });
     return;
   }
 
   const permissionError = getBotPermissionError(targetChannel, interaction.client.user);
   if (permissionError) {
-    await interaction.reply({ content: `❌ ${permissionError}`, ephemeral: true });
+    await interaction.reply({ content: `❌ ${permissionError}`, flags: MessageFlags.Ephemeral });
     return;
   }
 
   const messageId = interaction.options.getString('mensaje_id');
   const message = await targetChannel.messages.fetch(messageId).catch(() => null);
   if (!message) {
-    await interaction.reply({ content: '❌ No encontré ese mensaje en el canal indicado.', ephemeral: true });
+    await interaction.reply({ content: '❌ No encontré ese mensaje en el canal indicado.', flags: MessageFlags.Ephemeral });
     return;
   }
 
   if (message.author.id !== interaction.client.user.id) {
-    await interaction.reply({ content: '❌ Solo puedo editar mensajes que yo mismo envié.', ephemeral: true });
+    await interaction.reply({ content: '❌ Solo puedo editar mensajes que yo mismo envié.', flags: MessageFlags.Ephemeral });
     return;
   }
 
@@ -951,7 +953,7 @@ async function handleEdit(interaction) {
 
   const limitError = ensureEmbedLimits([embed]);
   if (limitError) {
-    await interaction.reply({ content: `❌ ${limitError}`, ephemeral: true });
+    await interaction.reply({ content: `❌ ${limitError}`, flags: MessageFlags.Ephemeral });
     return;
   }
 
@@ -960,11 +962,11 @@ async function handleEdit(interaction) {
   const buttonUrl = interaction.options.getString('boton_url');
 
   if ((buttonLabel && !buttonUrl) || (!buttonLabel && buttonUrl)) {
-    await interaction.reply({ content: '❌ Para cambiar el botón debes poner `boton_texto` y `boton_url` juntos.', ephemeral: true });
+    await interaction.reply({ content: '❌ Para cambiar el botón debes poner `boton_texto` y `boton_url` juntos.', flags: MessageFlags.Ephemeral });
     return;
   }
   if (buttonUrl && !isHttpUrl(buttonUrl)) {
-    await interaction.reply({ content: '❌ La URL del botón debe empezar con http:// o https://', ephemeral: true });
+    await interaction.reply({ content: '❌ La URL del botón debe empezar con http:// o https://', flags: MessageFlags.Ephemeral });
     return;
   }
 
@@ -977,20 +979,20 @@ async function handleEdit(interaction) {
     allowedMentions: { parse: [] }
   });
 
-  await interaction.reply({ content: `✅ Embed editado correctamente en ${targetChannel}.`, ephemeral: true });
+  await interaction.reply({ content: `✅ Embed editado correctamente en ${targetChannel}.`, flags: MessageFlags.Ephemeral });
 }
 
 async function handleJson(interaction) {
   const targetChannel = interaction.options.getChannel('canal') ?? interaction.channel;
   const targetError = validateMessageTarget(targetChannel);
   if (targetError) {
-    await interaction.reply({ content: `❌ ${targetError}`, ephemeral: true });
+    await interaction.reply({ content: `❌ ${targetError}`, flags: MessageFlags.Ephemeral });
     return;
   }
 
   const permissionError = getBotPermissionError(targetChannel, interaction.client.user);
   if (permissionError) {
-    await interaction.reply({ content: `❌ ${permissionError}`, ephemeral: true });
+    await interaction.reply({ content: `❌ ${permissionError}`, flags: MessageFlags.Ephemeral });
     return;
   }
 
@@ -999,15 +1001,15 @@ async function handleJson(interaction) {
   try {
     parsed = JSON.parse(raw);
   } catch {
-    await interaction.reply({ content: '❌ JSON inválido. Revisa comas, comillas y llaves.', ephemeral: true });
+    await interaction.reply({ content: '❌ JSON inválido. Revisa comas, comillas y llaves.', flags: MessageFlags.Ephemeral });
     return;
   }
 
   const rawEmbeds = Array.isArray(parsed.embeds) ? parsed.embeds : [parsed];
-  const uniqueEmbeds = rawEmbeds.slice(0, 10).map(data => EmbedBuilder.from(normalizeEmbedJson(data)));
+  const uniqueEmbeds = rawEmbeds.slice(0, 10).map(data => EmbedBuilder.from(localizeEmbedJson(data, interaction)));
   const limitError = ensureEmbedLimits(uniqueEmbeds);
   if (limitError) {
-    await interaction.reply({ content: `❌ ${limitError}`, ephemeral: true });
+    await interaction.reply({ content: `❌ ${limitError}`, flags: MessageFlags.Ephemeral });
     return;
   }
 
@@ -1026,7 +1028,7 @@ async function sendOrPreview(interaction, payload, targetChannel) {
 
   if (enviarDirecto) {
     await targetChannel.send(payload);
-    await interaction.reply({ content: `✅ Embed enviado correctamente en ${targetChannel}.`, ephemeral: true });
+    await interaction.reply({ content: `✅ Embed enviado correctamente en ${targetChannel}.`, flags: MessageFlags.Ephemeral });
     return;
   }
 
@@ -1042,6 +1044,6 @@ async function sendOrPreview(interaction, payload, targetChannel) {
     content: `👀 **Previsualización** — destino: ${targetChannel}\nToca **Enviar embed** para publicarlo o **Cancelar** para descartarlo.`,
     embeds: payload.embeds,
     components: previewComponents,
-    ephemeral: true
+    flags: MessageFlags.Ephemeral
   });
 }

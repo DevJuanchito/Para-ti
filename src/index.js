@@ -1,5 +1,5 @@
 require('dotenv').config();
-const { Client, Collection, GatewayIntentBits, Events } = require('discord.js');
+const { Client, Collection, GatewayIntentBits, Events, MessageFlags } = require('discord.js');
 const { deployCommands } = require('./deploy-commands');
 const { info, warn, error } = require('./utils/logger');
 const embedCommand = require('./commands/embed');
@@ -49,7 +49,7 @@ client.on(Events.InteractionCreate, async interaction => {
     error('Error procesando interacción.', err);
     const payload = {
       content: '❌ Ocurrió un error ejecutando el comando. Revisa la consola del bot.',
-      ephemeral: true
+      flags: MessageFlags.Ephemeral
     };
 
     if (interaction.deferred || interaction.replied) {

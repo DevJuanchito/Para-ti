@@ -120,12 +120,12 @@ function makeLinkButton(label, url) {
 function makePreviewButtons(sessionId) {
   return new ActionRowBuilder().addComponents(
     new ButtonBuilder()
-      .setCustomId(`embed_send:${sessionId}`)
+      .setCustomId(`embed:send:${sessionId}`)
       .setEmoji('📨')
       .setLabel('Enviar embed')
       .setStyle(ButtonStyle.Success),
     new ButtonBuilder()
-      .setCustomId(`embed_cancel:${sessionId}`)
+      .setCustomId(`embed:cancel:${sessionId}`)
       .setEmoji('🗑️')
       .setLabel('Cancelar')
       .setStyle(ButtonStyle.Danger)
