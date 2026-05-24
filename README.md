@@ -33,6 +33,25 @@ Hecho para subir a **GitHub** y desplegar en **Railway**.
   - `Read Message History`
   - `Use Slash Commands`
 
+
+## Importar JSON grande
+
+Discord limita lo que puedes pegar en un comando o modal. Para embeds grandes usa archivo:
+
+1. Crea un archivo `mi-embed.json` o `mi-embed.txt`.
+2. En Discord ejecuta `/embed json`.
+3. En la opción `archivo`, sube el archivo.
+4. Deja `json` vacío.
+5. Revisa la previsualización y toca **Enviar embed**.
+
+También funciona con `/embed importar` usando archivos `.json`, `.txt` o `.env`.
+
+Variable opcional para Railway:
+
+```env
+MAX_IMPORT_FILE_BYTES=250000
+```
+
 ## Variables de entorno
 
 Copia `.env.example` a `.env` para pruebas locales:

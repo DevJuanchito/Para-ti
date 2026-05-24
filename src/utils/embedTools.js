@@ -117,6 +117,50 @@ function makeLinkButton(label, url) {
   );
 }
 
+function makeButtonFromJson(component = {}) {
+  if (component.type !== 2 || Number(component.style) !== ButtonStyle.Link || !isHttpUrl(component.url)) {
+    return null;
+  }
+
+  const button = new ButtonBuilder()
+    .setStyle(ButtonStyle.Link)
+    .setURL(component.url)
+    .setLabel(safeString(component.label || 'Abrir', 80));
+
+  if (component.emoji) {
+    const emoji = component.emoji;
+    if (typeof emoji === 'string') button.setEmoji(emoji);
+    else if (emoji.id || emoji.name) {
+      button.setEmoji({
+        id: emoji.id,
+        name: emoji.name,
+        animated: Boolean(emoji.animated)
+      });
+    }
+  }
+
+  return button;
+}
+
+function buildComponentsFromJson(components) {
+  if (!Array.isArray(components)) return [];
+
+  const rows = [];
+  for (const row of components.slice(0, 5)) {
+    const sourceComponents = Array.isArray(row?.components) ? row.components : [row];
+    const buttons = sourceComponents
+      .slice(0, 5)
+      .map(makeButtonFromJson)
+      .filter(Boolean);
+
+    if (buttons.length) {
+      rows.push(new ActionRowBuilder().addComponents(buttons));
+    }
+  }
+
+  return rows;
+}
+
 function makePreviewButtons(sessionId) {
   return new ActionRowBuilder().addComponents(
     new ButtonBuilder()
@@ -522,6 +566,7 @@ module.exports = {
   validateMessageTarget,
   getBotPermissionError,
   makeLinkButton,
+  buildComponentsFromJson,
   makePreviewButtons,
   ensureEmbedLimits,
   normalizeEmbedJson,

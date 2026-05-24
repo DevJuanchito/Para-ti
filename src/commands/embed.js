@@ -12,6 +12,7 @@ const {
 const {
   buildMessagePayload,
   buildPayloadFromDraft,
+  buildComponentsFromJson,
   createEmbedFromOptions,
   createHelpEmbed,
   createPanelComponents,
@@ -95,6 +96,49 @@ async function getOwnedPanelSession(interaction, sessionId) {
 
 async function getTargetChannel(interaction, channelId) {
   return interaction.client.channels.fetch(channelId).catch(() => null);
+}
+
+async function readTextAttachment(attachment) {
+  if (!attachment) return null;
+
+  const maxBytes = Number(process.env.MAX_IMPORT_FILE_BYTES || 250000);
+  if (attachment.size && attachment.size > maxBytes) {
+    throw new Error(`El archivo es muy grande. Máximo permitido: ${Math.floor(maxBytes / 1000)} KB.`);
+  }
+
+  const name = String(attachment.name || '').toLowerCase();
+  const allowedExtensions = ['.json', '.txt', '.env'];
+  if (name && !allowedExtensions.some(ext => name.endsWith(ext))) {
+    throw new Error('Sube un archivo .json, .txt o .env.');
+  }
+
+  const response = await fetch(attachment.url);
+  if (!response.ok) {
+    throw new Error('No pude descargar el archivo adjunto desde Discord.');
+  }
+
+  const text = await response.text();
+  if (!text.trim()) {
+    throw new Error('El archivo está vacío.');
+  }
+  if (Buffer.byteLength(text, 'utf8') > maxBytes) {
+    throw new Error(`El archivo es muy grande. Máximo permitido: ${Math.floor(maxBytes / 1000)} KB.`);
+  }
+
+  return text;
+}
+
+async function getImportTextFromInteraction(interaction, stringOptionName, attachmentOptionName = 'archivo') {
+  const text = interaction.options.getString(stringOptionName);
+  const attachment = interaction.options.getAttachment(attachmentOptionName);
+
+  if (text && attachment) {
+    throw new Error('Usa solo una opción: pega texto o sube archivo, no ambas a la vez.');
+  }
+  if (text) return text;
+  if (attachment) return readTextAttachment(attachment);
+
+  throw new Error('Debes pegar texto o subir un archivo .json/.txt/.env.');
 }
 
 function addTextInput(modal, id, label, style, required, maxLength, value, placeholder) {
@@ -352,12 +396,16 @@ module.exports = {
         .setDescription('Enviar sin previsualización')))
     .addSubcommand(subcommand => subcommand
       .setName('importar')
-      .setDescription('Enviar un embed pegando JSON o formato ENV tipo TITLE=...')
+      .setDescription('Enviar un embed pegando JSON/ENV o subiendo archivo .json/.env')
       .addStringOption(option => option
         .setName('data')
-        .setDescription('JSON o ENV del embed')
-        .setRequired(true)
+        .setDescription('JSON o ENV del embed, máximo 4000 caracteres')
+        .setRequired(false)
         .setMaxLength(4000))
+      .addAttachmentOption(option => option
+        .setName('archivo')
+        .setDescription('Archivo .json, .txt o .env para imports grandes')
+        .setRequired(false))
       .addChannelOption(option => option
         .setName('canal')
         .setDescription('Canal donde se enviará. Si lo dejas vacío, usa el canal actual.')
@@ -438,12 +486,16 @@ module.exports = {
         .setDescription('Agregar fecha/hora nueva')))
     .addSubcommand(subcommand => subcommand
       .setName('json')
-      .setDescription('Crear un embed avanzado pegando JSON.')
+      .setDescription('Crear un embed avanzado pegando JSON o subiendo archivo grande.')
       .addStringOption(option => option
         .setName('json')
-        .setDescription('JSON del embed o mensaje con embeds')
-        .setRequired(true)
+        .setDescription('JSON del embed o mensaje con embeds, máximo 4000 caracteres')
+        .setRequired(false)
         .setMaxLength(4000))
+      .addAttachmentOption(option => option
+        .setName('archivo')
+        .setDescription('Archivo .json o .txt para JSON grande')
+        .setRequired(false))
       .addChannelOption(option => option
         .setName('canal')
         .setDescription('Canal donde se enviará. Si lo dejas vacío, usa el canal actual.')
@@ -486,7 +538,14 @@ module.exports = {
     }
 
     if (subcommand === 'importar') {
-      await handleImport(interaction, interaction.options.getString('data'));
+      let rawData;
+      try {
+        rawData = await getImportTextFromInteraction(interaction, 'data');
+      } catch (error) {
+        await interaction.reply({ content: `❌ ${error.message}`, flags: MessageFlags.Ephemeral });
+        return;
+      }
+      await handleImport(interaction, rawData);
       return;
     }
 
@@ -996,7 +1055,14 @@ async function handleJson(interaction) {
     return;
   }
 
-  const raw = interaction.options.getString('json');
+  let raw;
+  try {
+    raw = await getImportTextFromInteraction(interaction, 'json');
+  } catch (error) {
+    await interaction.reply({ content: `❌ ${error.message}`, flags: MessageFlags.Ephemeral });
+    return;
+  }
+
   let parsed;
   try {
     parsed = JSON.parse(raw);
@@ -1016,7 +1082,7 @@ async function handleJson(interaction) {
   const payload = {
     content: parsed.content ? safeString(replacePlaceholders(parsed.content, interaction), 2000) : undefined,
     embeds: uniqueEmbeds,
-    components: [],
+    components: buildComponentsFromJson(parsed.components),
     allowedMentions: { parse: [] }
   };
 
