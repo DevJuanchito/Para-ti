@@ -1,31 +1,36 @@
-# ✨ Embed Studio Bot
+# ✨ Embed Studio Bot GUI
 
-Bot de Discord dedicado a crear, previsualizar, enviar y editar **embeds bonitos** en cualquier canal donde tenga permisos.
+Bot de Discord dedicado a crear, previsualizar, enviar y editar **embeds bonitos** con una interfaz rápida dentro de Discord.
 
 Hecho para subir a **GitHub** y desplegar en **Railway**.
 
 ## Características
 
-- `/embed crear` — crea un embed personalizado.
-- `/embed plantilla` — usa plantillas decoradas para anuncios, reglas, updates, eventos, sorteos, staff, tienda y mantenimiento.
-- `/embed editar` — edita un embed enviado por el bot usando el ID del mensaje.
-- `/embed json` — pega JSON avanzado para crear embeds.
-- `/embed ayuda` — muestra ayuda rápida.
-- Previsualización privada antes de enviar.
-- Botones con enlace.
-- Imágenes y GIFs animados usando URL.
-- Placeholders: `{user}`, `{username}`, `{server}`, `{memberCount}`, `{channel}`.
-- Sin MongoDB, sin base de datos, sin archivos de configuración obligatorios.
+- `/embed panel` — abre un editor visual privado con botones, menú de plantillas y formularios.
+- Selector de plantillas: anuncios, reglas, updates, eventos, sorteos, staff, tienda, mantenimiento, premium y neon.
+- Botón **Texto** para editar título, descripción, contenido, footer y autor.
+- Botón **Visual** para editar color, imagen/GIF, thumbnail, URL del título y timestamp.
+- Botón **Botón** para agregar un botón con enlace.
+- Botón **JSON/ENV** para pegar un embed completo rápidamente.
+- `/embed importar` — envía un embed pegando JSON o formato ENV.
+- `/embed crear` — crear embed por opciones slash.
+- `/embed plantilla` — usar plantillas decoradas por comando.
+- `/embed editar` — editar embeds que el bot ya envió.
+- `/embed json` — pegar JSON avanzado.
+- `/embed ayuda` — guía dentro de Discord.
+- No usa MongoDB, base de datos ni archivos de guardado.
 - Funciona en el canal actual si no eliges canal.
 
 ## Requisitos
 
 - Node.js 20 o superior.
 - Una aplicación de Discord con bot creado.
-- Permisos del bot en el servidor:
+- Permisos recomendados del bot en el servidor:
+  - `View Channels`
   - `Send Messages`
   - `Embed Links`
-  - `Read Message History` si quieres usar `/embed editar`
+  - `Attach Files`
+  - `Read Message History`
   - `Use Slash Commands`
 
 ## Variables de entorno
@@ -76,40 +81,73 @@ BOT_BRAND=Embed Studio
 
 5. Railway ejecutará `npm start` usando `railway.json`.
 
-No necesitas MongoDB ni volumen para este bot, porque no guarda configuración permanente.
+No necesitas MongoDB ni volumen porque este bot no guarda configuraciones permanentes.
 
-## Cómo usarlo
+## Uso rápido
 
-### Crear embed personalizado
+### Editor visual
+
+```text
+/embed panel
+```
+
+Eso abre una interfaz privada con:
+
+- Menú de plantillas.
+- Botón `Texto`.
+- Botón `Visual`.
+- Botón `Botón`.
+- Botón `JSON/ENV`.
+- Botón `Enviar`.
+
+### Formato ENV rápido
+
+Puedes pegar esto en el botón `JSON/ENV` o usar `/embed importar`:
+
+```env
+TITLE=📢・ANUNCIO OFICIAL
+DESCRIPTION=✨ Tenemos novedades para {server}\n\n> Gracias por estar aquí.
+COLOR=premium
+IMAGE=https://media.giphy.com/media/l0HlQ7LRalQqdWfao/giphy.gif
+THUMBNAIL=https://i.imgur.com/AfFp7pu.png
+FOOTER={server} • Anuncios
+CONTENT=@everyone
+BUTTON_TEXT=Ver más
+BUTTON_URL=https://discord.com
+TIMESTAMP=true
+```
+
+### JSON rápido
+
+```json
+{
+  "content": "@everyone",
+  "embeds": [
+    {
+      "title": "📢・ANUNCIO OFICIAL",
+      "description": "✨ Tenemos novedades para {server}",
+      "color": "premium",
+      "image": { "url": "https://media.giphy.com/media/l0HlQ7LRalQqdWfao/giphy.gif" },
+      "footer": { "text": "{server} • Anuncios" }
+    }
+  ],
+  "button": {
+    "label": "Ver más",
+    "url": "https://discord.com"
+  }
+}
+```
+
+### Crear por comando
 
 ```text
 /embed crear titulo:📢 Anuncio descripcion:Hoy hay novedades color:premium
 ```
 
-### Enviar al canal actual
-
-No pongas `canal` y se enviará donde ejecutaste el comando.
-
-### Enviar a otro canal
-
-Usa la opción `canal`.
-
 ### Plantillas bonitas
 
 ```text
-/embed plantilla tipo:📢 Anuncio mensaje:Nuevo evento hoy a las 7PM
-```
-
-### GIF animado
-
-Pon una URL `.gif` en `imagen` o `thumbnail`.
-
-### Botón con enlace
-
-Usa `boton_texto` y `boton_url` juntos.
-
-```text
-/embed crear titulo:Visita la web descripcion:Toca el botón boton_texto:Abrir boton_url:https://example.com
+/embed plantilla tipo:💎 Premium mensaje:Nuevo evento hoy a las 7PM
 ```
 
 ### Editar un embed
@@ -120,37 +158,9 @@ Activa el modo desarrollador en Discord, copia el ID del mensaje y usa:
 /embed editar mensaje_id:123456789 titulo:Nuevo título descripcion:Nueva descripción
 ```
 
-## JSON avanzado
+## Notas
 
-Puedes pegar un embed simple:
-
-```json
-{
-  "title": "📢 Anuncio",
-  "description": "Mensaje bonito",
-  "color": 5793266
-}
-```
-
-O un mensaje completo:
-
-```json
-{
-  "content": "Texto fuera del embed",
-  "embeds": [
-    {
-      "title": "✨ Embed avanzado",
-      "description": "Creado desde JSON",
-      "color": 16741370
-    }
-  ]
-}
-```
-
-## Seguridad
-
-Nunca subas tu `.env` ni tu token a GitHub. El archivo `.gitignore` ya bloquea `.env`.
-
-## Nota
-
-Discord no permite animar un embed como una página web, pero sí puedes usar GIFs, emojis, imágenes, thumbnails y botones para que se vea más premium.
+- La interfaz usa mensajes privados/efímeros, así que solo tú ves la previsualización mientras editas.
+- Las imágenes y GIFs deben ser URLs `http://` o `https://`.
+- Los embeds tienen límite total combinado de 6000 caracteres.
+- Las variables `.env` reales son para configurar el bot. El formato ENV del editor es solo para crear embeds rápido.

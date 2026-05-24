@@ -29,6 +29,16 @@ client.on(Events.InteractionCreate, async interaction => {
       if (handled) return;
     }
 
+    if (interaction.isStringSelectMenu()) {
+      const handled = await embedCommand.handleSelectMenu(interaction);
+      if (handled) return;
+    }
+
+    if (interaction.isModalSubmit()) {
+      const handled = await embedCommand.handleModal(interaction);
+      if (handled) return;
+    }
+
     if (!interaction.isChatInputCommand()) return;
 
     const command = client.commands.get(interaction.commandName);
