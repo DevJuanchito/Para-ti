@@ -1,235 +1,156 @@
-# ✨ Discord Premium Welcome Bot
+# ✨ Embed Studio Bot
 
-Bot de Discord en **Node.js + discord.js v14** para configurar:
+Bot de Discord dedicado a crear, previsualizar, enviar y editar **embeds bonitos** en cualquier canal donde tenga permisos.
 
-- 🌸 Bienvenidas con embeds bonitos.
-- 🌙 Despedidas configurables.
-- 📢 Anuncios con embeds, rol mencionado y botón opcional.
-- 🎨 Embeds personalizados para mensajes importantes.
-- 💾 Configuración guardada en MongoDB para Railway.
-- 🚀 Health server incluido para despliegue en Railway.
+Hecho para subir a **GitHub** y desplegar en **Railway**.
 
----
+## Características
 
-## 📁 Estructura
+- `/embed crear` — crea un embed personalizado.
+- `/embed plantilla` — usa plantillas decoradas para anuncios, reglas, updates, eventos, sorteos, staff, tienda y mantenimiento.
+- `/embed editar` — edita un embed enviado por el bot usando el ID del mensaje.
+- `/embed json` — pega JSON avanzado para crear embeds.
+- `/embed ayuda` — muestra ayuda rápida.
+- Previsualización privada antes de enviar.
+- Botones con enlace.
+- Imágenes y GIFs animados usando URL.
+- Placeholders: `{user}`, `{username}`, `{server}`, `{memberCount}`, `{channel}`.
+- Sin MongoDB, sin base de datos, sin archivos de configuración obligatorios.
+- Funciona en el canal actual si no eliges canal.
 
-```txt
-.
-├─ package.json
-├─ railway.json
-├─ .env.example
-├─ .gitignore
-├─ README.md
-└─ src/
-   ├─ index.js
-   ├─ deploy-commands.js
-   ├─ commands/
-   │  ├─ ayuda.js
-   │  ├─ anuncio.js
-   │  ├─ embed.js
-   │  ├─ config-bienvenida.js
-   │  ├─ config-despedida.js
-   │  ├─ config-ver.js
-   │  └─ config-reset.js
-   ├─ lib/
-   │  ├─ configHelpers.js
-   │  ├─ database.js
-   │  ├─ embedFactory.js
-   │  ├─ placeholders.js
-   │  ├─ registerCommands.js
-   │  └─ validators.js
-   └─ models/
-      └─ GuildConfig.js
-```
+## Requisitos
 
----
+- Node.js 20 o superior.
+- Una aplicación de Discord con bot creado.
+- Permisos del bot en el servidor:
+  - `Send Messages`
+  - `Embed Links`
+  - `Read Message History` si quieres usar `/embed editar`
+  - `Use Slash Commands`
 
-## 🔐 Variables de entorno
+## Variables de entorno
 
-Copia `.env.example` como `.env` para desarrollo local.
+Copia `.env.example` a `.env` para pruebas locales:
 
 ```env
-DISCORD_TOKEN=pon_tu_token_aqui
-CLIENT_ID=id_de_tu_aplicacion
-MONGO_URL=mongodb://usuario:password@host:puerto/database
-GUILD_ID=id_de_tu_servidor
-AUTO_DEPLOY_COMMANDS=false
-PORT=3000
+DISCORD_TOKEN=PEGA_TU_TOKEN_AQUI
+CLIENT_ID=PEGA_EL_CLIENT_ID_AQUI
+GUILD_ID=
+AUTO_DEPLOY_COMMANDS=true
+BOT_BRAND=Embed Studio
 ```
 
-**No subas `.env` a GitHub.** Tu token es como una contraseña.
+### GUILD_ID
 
----
+- Con `GUILD_ID` lleno: los comandos aparecen rápido solo en ese servidor.
+- Con `GUILD_ID` vacío: los comandos son globales para todos los servidores donde invites el bot.
 
-## 🤖 Crear el bot en Discord
-
-1. Entra al Discord Developer Portal.
-2. Crea una aplicación.
-3. Ve a **Bot** y crea el bot.
-4. Copia el token y úsalo como `DISCORD_TOKEN`.
-5. Copia el **Application ID** y úsalo como `CLIENT_ID`.
-6. En la pestaña **Bot**, activa **Server Members Intent** para que funcionen bienvenidas/despedidas.
-7. Invita el bot con scopes:
-   - `bot`
-   - `applications.commands`
-8. Permisos recomendados:
-   - View Channels
-   - Send Messages
-   - Embed Links
-   - Read Message History
-   - Use External Emojis
-
----
-
-## 🧪 Ejecutar localmente
+## Instalación local
 
 ```bash
 npm install
-npm run deploy-commands
+npm run deploy
 npm start
 ```
 
-Para pruebas rápidas, pon `GUILD_ID` en `.env`. Los comandos de servidor aparecen mucho más rápido que los globales.
-
----
-
-## 🚀 Subir a GitHub
+También puedes dejar `AUTO_DEPLOY_COMMANDS=true` y solo ejecutar:
 
 ```bash
-git init
-git add .
-git commit -m "Initial Discord premium bot"
-git branch -M main
-git remote add origin https://github.com/TU_USUARIO/TU_REPO.git
-git push -u origin main
+npm start
 ```
 
----
+## Deploy en Railway
 
-## 🚂 Deploy en Railway
-
-1. Crea un proyecto en Railway.
-2. Selecciona **Deploy from GitHub repo**.
-3. Elige tu repositorio.
-4. Agrega una base de datos **MongoDB** en el mismo proyecto.
-5. En el servicio del bot, abre **Variables** y agrega:
-   - `DISCORD_TOKEN`
-   - `CLIENT_ID`
-   - `MONGO_URL`
-   - `AUTO_DEPLOY_COMMANDS=true` para registrar comandos al iniciar
-   - `GUILD_ID` opcional para pruebas en un servidor concreto
-6. Deploy.
-
-Railway asigna `PORT` automáticamente, así que no tienes que crear esa variable en producción.
-
----
-
-## 💬 Comandos
-
-### `/config-bienvenida`
-
-Configura el canal, título, descripción, color, imagen/GIF, thumbnail, footer y prueba.
-
-Ejemplo de descripción:
-
-```txt
-꒰ঌ Hola {user} ໒꒱
-
-✨ Bienvenid@ a **{server}**.
-💫 Ahora somos **{memberCount}** miembros.
-```
-
-### `/config-despedida`
-
-Configura el mensaje cuando alguien sale del servidor.
-
-### `/anuncio`
-
-Envía un anuncio premium con:
-
-- Canal
-- Mensaje
-- Título
-- Color
-- Imagen o GIF
-- Rol mencionado
-- Botón con URL
-
-### `/embed`
-
-Crea un embed personalizado para reglas, información, eventos o mensajes decorativos.
-
-### `/config-ver`
-
-Muestra la configuración actual.
-
-### `/config-reset`
-
-Reinicia bienvenida, despedida o todo.
-
-### `/ayuda`
-
-Muestra una guía rápida dentro del servidor.
-
----
-
-## 🪄 Placeholders disponibles
-
-Puedes usarlos en títulos, descripciones y footers de bienvenida/despedida:
-
-```txt
-{user}
-{user.mention}
-{user.id}
-{user.username}
-{user.tag}
-{server}
-{server.id}
-{memberCount}
-{createdAt}
-{joinedAt}
-```
-
----
-
-## 🎨 Ideas para que se vea más premium
-
-- Usa GIFs en `imagen`.
-- Usa colores como `#ff77dd`, `#b388ff`, `#00d4ff`, `#ffd166`.
-- Usa emojis animados de tu servidor en los textos.
-- Crea canales separados: `🌸・bienvenidas`, `🌙・despedidas`, `📢・anuncios`.
-- Usa botones en anuncios para reglas, tienda, redes o formularios.
-
----
-
-## 🧯 Problemas comunes
-
-### No llegan bienvenidas o despedidas
-
-Activa **Server Members Intent** en el Developer Portal y reinicia el bot.
-
-### Los comandos no aparecen
-
-Ejecuta:
-
-```bash
-npm run deploy-commands
-```
-
-O en Railway pon:
+1. Sube este proyecto a GitHub.
+2. Entra a Railway.
+3. Crea un nuevo proyecto desde tu repo de GitHub.
+4. Agrega estas variables en Railway:
 
 ```env
+DISCORD_TOKEN=tu_token_real
+CLIENT_ID=id_de_tu_aplicacion
+GUILD_ID=
 AUTO_DEPLOY_COMMANDS=true
+BOT_BRAND=Embed Studio
 ```
 
-Para pruebas rápidas usa `GUILD_ID`.
+5. Railway ejecutará `npm start` usando `railway.json`.
 
-### Railway reinicia y pierdo configuración
+No necesitas MongoDB ni volumen para este bot, porque no guarda configuración permanente.
 
-Este proyecto usa MongoDB. Asegúrate de tener `MONGO_URL` correcto en Railway.
+## Cómo usarlo
 
----
+### Crear embed personalizado
 
-## 📜 Licencia
+```text
+/embed crear titulo:📢 Anuncio descripcion:Hoy hay novedades color:premium
+```
 
-MIT
+### Enviar al canal actual
+
+No pongas `canal` y se enviará donde ejecutaste el comando.
+
+### Enviar a otro canal
+
+Usa la opción `canal`.
+
+### Plantillas bonitas
+
+```text
+/embed plantilla tipo:📢 Anuncio mensaje:Nuevo evento hoy a las 7PM
+```
+
+### GIF animado
+
+Pon una URL `.gif` en `imagen` o `thumbnail`.
+
+### Botón con enlace
+
+Usa `boton_texto` y `boton_url` juntos.
+
+```text
+/embed crear titulo:Visita la web descripcion:Toca el botón boton_texto:Abrir boton_url:https://example.com
+```
+
+### Editar un embed
+
+Activa el modo desarrollador en Discord, copia el ID del mensaje y usa:
+
+```text
+/embed editar mensaje_id:123456789 titulo:Nuevo título descripcion:Nueva descripción
+```
+
+## JSON avanzado
+
+Puedes pegar un embed simple:
+
+```json
+{
+  "title": "📢 Anuncio",
+  "description": "Mensaje bonito",
+  "color": 5793266
+}
+```
+
+O un mensaje completo:
+
+```json
+{
+  "content": "Texto fuera del embed",
+  "embeds": [
+    {
+      "title": "✨ Embed avanzado",
+      "description": "Creado desde JSON",
+      "color": 16741370
+    }
+  ]
+}
+```
+
+## Seguridad
+
+Nunca subas tu `.env` ni tu token a GitHub. El archivo `.gitignore` ya bloquea `.env`.
+
+## Nota
+
+Discord no permite animar un embed como una página web, pero sí puedes usar GIFs, emojis, imágenes, thumbnails y botones para que se vea más premium.
