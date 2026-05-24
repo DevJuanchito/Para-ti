@@ -1,13 +1,16 @@
 {
   "name": "embed-studio-bot-gui",
-  "version": "1.1.0",
+  "version": "1.1.1",
   "description": "Bot de Discord para crear embeds con panel visual, JSON y ENV, listo para Railway.",
   "main": "src/index.js",
   "type": "commonjs",
   "scripts": {
     "start": "node src/index.js",
     "deploy": "node src/deploy-commands.js",
-    "check": "node --check src/index.js && node --check src/deploy-commands.js && node --check src/commands/embed.js && node --check src/utils/embedTools.js && node --check src/utils/logger.js"
+    "check": "node --check src/index.js && node --check src/deploy-commands.js && node --check src/clear-commands.js && node --check src/commands/embed.js && node --check src/utils/embedTools.js && node --check src/utils/logger.js",
+    "clear:global": "node src/clear-commands.js global",
+    "clear:guild": "node src/clear-commands.js guild",
+    "clear:all": "node src/clear-commands.js all"
   },
   "engines": {
     "node": ">=20.0.0"

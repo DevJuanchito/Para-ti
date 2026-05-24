@@ -162,7 +162,7 @@ function buildPanelImportModal(sessionId) {
     true,
     4000,
     '',
-    'TITLE=📢 Anuncio\nDESCRIPTION=Texto aquí\nCOLOR=premium\nIMAGE=https://...gif\nBUTTON_TEXT=Abrir\nBUTTON_URL=https://...'
+    'Pega aquí tu JSON o ENV. Ejemplo: TITLE=Anuncio'
   );
 
   return modal;
