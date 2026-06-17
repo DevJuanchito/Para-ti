@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <title>Para Ann ❤️</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+
+<body>
+
+  <video id="background-video" autoplay loop muted playsinline>
+    <source src="video.mp4" type="video/mp4">
+  </video>
+
+  <div class="romantic-overlay"></div>
+  <div id="hearts-container"></div>
+
+  <main id="book" class="book">
+    <div class="book-glow"></div>
+    <div class="spiral"></div>
+    <div class="back-cover"></div>
+  </main>
+
+  <div id="mobile-nav" class="mobile-nav">
+    <button id="mobile-prev-btn">← Anterior</button>
+    <button id="mobile-next-btn">Siguiente →</button>
+  </div>
+
+  <div id="lock-modal">
+    <div class="modal-content">
+      <div class="floating-hearts">💖</div>
+      <div class="lock-icon">🔒✨</div>
+
+      <h2>Acceso al corazón</h2>
+      <p>Para abrir este regalo, escribe nuestra fecha especial:</p>
+
+      <input
+        type="password"
+        id="password-input"
+        placeholder="Ej: 18"
+        autocomplete="off"
+        inputmode="numeric"
+      >
+
+      <div class="modal-buttons">
+        <button id="unlock-btn">Desbloquear ❤️</button>
+        <button id="close-modal-btn">Cancelar</button>
+      </div>
+
+      <p id="error-message">Ups, esa no es la fecha 💔</p>
+    </div>
+  </div>
+
+  <script src="script.js"></script>
+</body>
+</html>
